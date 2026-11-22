@@ -71,7 +71,7 @@ const theme = {
   apply() {
     const r = this.resolved();
     document.documentElement.dataset.ui = r;
-    const m = document.querySelector('meta[name="theme-color"]'); if (m) m.content = r === "dark" ? "#07070D" : "#EEF1FF";
+    const m = document.querySelector('meta[name="theme-color"]'); if (m) m.content = r === "dark" ? "#0F131B" : "#D8E0EC";
     document.querySelectorAll("#themeOpts .theme-opt").forEach(b => b.classList.toggle("on", b.dataset.theme === this.pref));
     charts.redrawAll();
   },
@@ -908,6 +908,28 @@ const nav = {
   },
 };
 
+/* ───────── 앱 설치 (홈 화면에 추가) ───────── */
+const installer = {
+  evt: null,
+  get installed() { return matchMedia("(display-mode: standalone)").matches || navigator.standalone === true; },
+  get ios() { return /iPhone|iPad|iPod/.test(navigator.userAgent); },
+  init() {
+    if (!inPreview() && "serviceWorker" in navigator && window.isSecureContext) navigator.serviceWorker.register("sw.js").catch(() => {});
+    window.addEventListener("beforeinstallprompt", e => { e.preventDefault(); this.evt = e; this.render(); });
+    window.addEventListener("appinstalled", () => { this.evt = null; this.render(); toast("엘모션을 설치했어요. 홈 화면에서 열 수 있어요."); });
+    $("#btnInstall").onclick = () => this.run();
+    this.render();
+  },
+  render() { $("#btnInstall").hidden = this.installed || inPreview(); },
+  async run() {
+    if (this.evt) { this.evt.prompt(); const r = await this.evt.userChoice; if (r.outcome === "accepted") this.evt = null; this.render(); return; }
+    const how = this.ios
+      ? "사파리나 크롬에서 공유 버튼(네모에 위쪽 화살표)을 누른 뒤 '홈 화면에 추가'를 고르세요."
+      : "크롬 오른쪽 위 ⋮ 메뉴에서 '앱 설치' 또는 '홈 화면에 추가'를 고르세요. 컴퓨터에서는 주소창 오른쪽의 설치 아이콘을 눌러도 돼요.";
+    dialog(`<h3>앱으로 설치하기</h3><p>${esc(how)}</p><div class="acts"><button class="solid" id="dOk">확인</button></div>`, (b, close) => { b.querySelector("#dOk").onclick = close; });
+  },
+};
+
 /* ════════════════════════════════════════════════════════════════
    시작
    ════════════════════════════════════════════════════════════════ */
@@ -922,6 +944,7 @@ const nav = {
   home.render();
   records.render();
   stagger($(".nav")); stagger($("#pHome"));
+  installer.init();
   $("#btnImport").onclick = () => $("#fileIn").click();
   $("#fileIn").onchange = e => { const f = [...e.target.files]; e.target.value = ""; records.importFiles(f); };
   $("#btnExport").onclick = () => (records.selecting ? records.endSelect() : records.startSelect());
