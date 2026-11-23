@@ -183,6 +183,12 @@
       this.quietN = Math.round(P.QUIET_SEC * fs);
       this.out = { acc: 0, mot: 0, jerk: 0, vibV: 0, vibL: 0, speed: 0, dist: 0, moving: false, ppV: 0, ppL: 0 };
     }
+    /** 움직이는 중에 시작했을 때: 처음 속력(m/s)을 정해 준다 */
+    seed(v) { this.v = v; this.moving = true; this.peak = Math.abs(v); }
+    /** 지금 서 있는가 (정지 판정 직전, 0.3초 이상 조용하고 속력이 거의 0인 경우 포함) */
+    get still() {
+      return !this.moving || (this.quiet >= 0.3 * this.fs && Math.abs(this.v) < Math.max(P.STOP_ABS, P.STOP_RATIO * this.peak));
+    }
     /** vert/lat: m/s² (중력 제거). lat 이 NaN 이면 좌우 없음 */
     push(vertIn, lat) {
       const vert = vertIn - this.bias;
@@ -260,17 +266,79 @@
     if (segs) for (const s of segs) if (s > st[st.length - 1] && s < n) st.push(s);
     return st.map((s, k) => [s, k + 1 < st.length ? st[k + 1] : n]);
   }
+  /** 한 구간을 따로 돌려 본 결과 (판단용) */
+  function trialRun(vert, s, e, fs, seed) {
+    const an = new RideAnalyzer(fs); if (seed) an.seed(seed);
+    const mot = new Float32Array(e - s), v = new Float32Array(e - s), mv = new Uint8Array(e - s);
+    let firstMove = -1, firstReset = -1;
+    for (let i = s; i < e; i++) {
+      const was = an.moving, o = an.push(vert[i], NaN), k = i - s;
+      mot[k] = o.mot; v[k] = an.v; mv[k] = o.moving ? 1 : 0;
+      if (firstMove < 0 && o.moving) firstMove = k;
+      if (firstReset < 0 && was && !o.moving) firstReset = k;
+    }
+    return { an, mot, v, mv, firstMove, firstReset, still: an.still };
+  }
+  /** 움직임 덩어리(같은 부호의 가속·감속): [시작, 끝, 부호, 끝난 뒤 0.5초 이상 조용한가] */
+  function lobesOf(mot, from, fs) {
+    const out = [], n = mot.length, qn = Math.round(P.QUIET_SEC * fs);
+    for (let i = from; i < n;) {
+      if (Math.abs(mot[i]) <= P.MOVE) { i++; continue; }
+      const sg = Math.sign(mot[i]); let j = i;
+      while (j < n && Math.sign(mot[j]) === sg && Math.abs(mot[j]) > P.DEAD) j++;
+      const last = out[out.length - 1];
+      if (last && last[2] === sg && i - last[1] < qn) last[1] = j; else out.push([i, j, sg]);   // 잠깐 끊긴 같은 방향은 하나로
+      i = j;
+    }
+    for (const l of out) { let q = 0; for (let k = l[1]; k < n && Math.abs(mot[k]) < P.DEAD; k++) q++; l[3] = q >= qn; }
+    return out;
+  }
+  /** 일시정지 경계 처리 (2026-11-24 사용자 확정)
+      · 멈출 때와 재개할 때 모두 서 있었으면 → 한 줄로 매끄럽게 이어서 분석
+      · 어느 쪽이든 움직이는 중이었으면 → 구간을 나누고, 잘린 운행은 가감속 모양 평가에서 뺀다
+      · 움직이는 중에 재개했다고 판단되면 → 첫 감속이 끝날 때 속력이 0이 되도록 처음 속력을 정한다 */
+  function planSegs(vert, n, segs, fs) {
+    const raw = segBounds(n, segs);
+    const info = [];
+    for (let k = 0; k < raw.length; k++) {
+      const [s, e] = raw[k];
+      let startMoving = false, seed = 0;
+      if (k > 0) {
+        const t = trialRun(vert, s, e, fs, 0);
+        if (t.firstMove >= 0 && t.firstReset < 0) {
+          // 처음 운행이 끝내 정지로 돌아오지 않음 → 서 있다가 출발한 것과 맞지 않을 수 있다
+          const lb = lobesOf(t.mot, t.firstMove, fs), done = lb.filter(l => l[3]);
+          startMoving = done.length >= 2 || !info[k - 1].endStill;
+          if (startMoving && lb.length && lb[0][3]) seed = -t.v[Math.min(e - s - 1, lb[0][1] + Math.round(P.QUIET_SEC * fs))];
+        }
+      }
+      const fin = trialRun(vert, s, e, fs, seed);
+      info.push({ s, e, startMoving, seed, endStill: fin.still });
+    }
+    // 서 있을 때 멈추고 서 있을 때 재개한 경계는 잇는다
+    const groups = [];
+    for (let k = 0; k < info.length; k++) {
+      const I = info[k], g = groups[groups.length - 1];
+      if (g && info[k - 1].endStill && !I.startMoving) { g.e = I.e; g.endStill = I.endStill; g.last = k; }
+      else groups.push({ s: I.s, e: I.e, startMoving: I.startMoving, seed: I.seed, endStill: I.endStill, last: k });
+    }
+    for (const g of groups) g.endCut = g.last < info.length - 1 && !g.endStill;   // 움직이는 중에 일시정지
+    return { raw, groups };
+  }
   function analyze(vert, lat, fs = FS, segs) {
     const n = vert.length, hasLat = !!lat;
-    const bounds = segBounds(n, segs);
+    const plan = planSegs(vert, n, segs, fs);
+    const bounds = plan.groups.map(g => [g.s, g.e]);
     const S = {
       acc: new Float32Array(n), jerk: new Float32Array(n), vibV: new Float32Array(n),
       vibL: new Float32Array(n), speed: new Float32Array(n), dist: new Float32Array(n),
     };
     const mot = new Float32Array(n), moving = new Uint8Array(n);
     let distOff = 0;
-    for (const [s, e] of bounds) {
-      const an = new RideAnalyzer(fs);          // 구간마다 필터·속력 적분을 새로 시작
+    for (const g of plan.groups) {
+      const s = g.s, e = g.e;
+      const an = new RideAnalyzer(fs);          // 나뉜 구간마다 필터·속력 적분을 새로 시작
+      if (g.seed) an.seed(g.seed);
       for (let i = s; i < e; i++) {
         const o = an.push(vert[i], hasLat ? lat[i] : NaN);
         S.acc[i] = o.acc; S.jerk[i] = o.jerk; S.vibV[i] = o.vibV; S.vibL[i] = hasLat ? o.vibL : NaN;
@@ -281,13 +349,18 @@
 
     // 운행 구간 (경계 0~3 근사): moving 구간 + 앞뒤 0.5초 (일시정지 경계는 넘지 않음)
     const pad = Math.round(0.5 * fs);
-    const trips = [];
-    for (const [s, e] of bounds) {
+    const trips = [], cutTrips = new Set();
+    for (const g of plan.groups) {
+      const s = g.s, e = g.e, first = trips.length;
       for (let i = s; i < e;) {
         if (!moving[i]) { i++; continue; }
         let j = i; while (j < e && moving[j]) j++;
         trips.push([Math.max(s, i - pad), Math.min(e - 1, j - 1 + pad)]);
         i = j;
+      }
+      if (trips.length > first) {
+        if (g.startMoving) cutTrips.add(first);
+        if (g.endCut) cutTrips.add(trips.length - 1);
       }
     }
     const tripMask = new Uint8Array(n);
@@ -332,9 +405,10 @@
       accMax, decMax, accPeak: Math.max(accMax, decMax),
       jerkMax, vibV, vibL, speedUp: up, speedDown: down, speedMax: Math.max(up, down),
       distance: n ? S.dist[n - 1] : 0, cruise: cruise.map(([a, b]) => [a / fs, b / fs]),
-      pauses: bounds.slice(1).map(([s]) => s / fs),
+      pauses: plan.raw.slice(1).map(([s]) => s / fs),
     };
-    m.ride = rideShape(vert, trips, fs, bounds);
+    // 일시정지로 잘린 운행은 가감속 모양 평가에서 뺀다 (최고 가감속도·속력·흔들림에는 그대로 쓴다)
+    m.ride = rideShape(vert, trips.filter((_, k) => !cutTrips.has(k)), fs, bounds);
     m.eval = evaluate(m);
     return { series: S, m };
   }
@@ -489,7 +563,7 @@
      흔들림(A95): ~8 아주 훌륭, ~10 좋음, ~20 일반적, ~30 좋지 않음, 그 이상 불쾌
      가감속 모양(가감속도+저크+가가가속도): 내부 점수 → 등급(훌륭/좋아요/무난/아쉬워요/점검) + 한마디 평
      속력: ~70 저속, ~130 중속, ~250 고속, ~500 초고속, 그 이상 '초고속의 초월' */
-  const EVAL_VER = 14;
+  const EVAL_VER = 15;
   function accGrade(a) {
     if (a <= 0.4) return { lv: 0, t: "거의 느껴지지 않을 만큼 순해요", s: "순해요" };
     if (a <= 0.7) return { lv: 1, t: "부드러워요", s: "부드러워요" };
