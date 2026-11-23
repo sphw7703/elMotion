@@ -311,16 +311,27 @@ const baro = {
   get source() { return typeof window.PressureSensor === "function" ? "sensor" : this.bridgeOk ? "bridge" : null; },
   connectBridge() {
     if (!/^(localhost|127\.0\.0\.1)$/.test(location.hostname) || typeof EventSource !== "function") return;
-    try {
-      const es = new EventSource("baro");
-      es.onmessage = e => {
-        const p = parseFloat(e.data); if (!(p > 300 && p < 1200)) return;
-        const first = !this.bridgeOk; this.bridgeOk = true; this.live = p;
-        if (this.rec && !this.paused) this.samples.push({ t: (performance.now() - this.t0) / 1000, p });
-        const now = performance.now();
-        if (first || now - this.liveAt > 1000) { this.liveAt = now; if (typeof settings !== "undefined") settings.renderBaro(); }
-      };
-    } catch (e) { /* 중계기 없음 */ }
+    // 화면이 보일 때만 연결한다 (측정 중이면 계속). 연결이 끊기면 중계기가 기압계를 끄고, 오래 끊기면 중계기도 꺼진다.
+    const open = () => {
+      if (this.es) return;
+      try {
+        const es = this.es = new EventSource("baro");
+        es.onmessage = e => {
+          const p = parseFloat(e.data); if (!(p > 300 && p < 1200)) return;
+          const first = !this.bridgeOk; this.bridgeOk = true; this.live = p;
+          if (this.rec && !this.paused) this.samples.push({ t: (performance.now() - this.t0) / 1000, p });
+          const now = performance.now();
+          if (first || now - this.liveAt > 1000) { this.liveAt = now; if (typeof settings !== "undefined") settings.renderBaro(); }
+        };
+        es.onerror = () => {
+          if (this.bridgeOk) { this.bridgeOk = false; this.live = null; if (typeof settings !== "undefined") settings.renderBaro(); }
+        };
+      } catch (e) { this.es = null; }
+    };
+    const close = () => { if (this.es) { this.es.close(); this.es = null; } };
+    document.addEventListener("visibilitychange", () => { if (document.hidden && !this.rec) close(); else if (!document.hidden) open(); });
+    window.addEventListener("pagehide", close);
+    open();
   },
   start(t0) {
     this.samples = []; this.t0 = t0; this.paused = false; this.recSec = 0; this.rec = false;
@@ -974,6 +985,7 @@ const settings = {
     sw.disabled = !ok; sw.setAttribute("aria-checked", ok && baro.on ? "true" : "false");
     const live = baro.source === "bridge" && baro.live ? ` · 지금 ${baro.live.toFixed(2)} hPa` : "";
     $("#baroDesc").textContent = ok ? (baro.on ? "속력과 운행 거리를 기압 변화로 보정해요" : "가속도 센서만으로 계산해요") + live
+      : /^(localhost|127\.0\.0\.1)$/.test(location.hostname) ? "기압 중계기가 꺼져 있어요. Termux에서 켜 주세요"
       : "이 기기(브라우저)에서는 기압계를 쓸 수 없어 꺼져 있어요";
   },
   renderMode() {
