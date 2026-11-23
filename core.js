@@ -179,12 +179,24 @@
       this.lpL = Biquad.make(P.VIB_LP, fs, false);
       this.ppV = new PeakToPeak(fs); this.ppL = new PeakToPeak(fs);
       this.v = 0; this.bias = 0; this.moving = false; this.peak = 0; this.quiet = 0; this.dist = 0;
-      this.prevJ = 0; this.first = true;
+      this.prevJ = 0; this.first = true; this.hold = 0;
       this.quietN = Math.round(P.QUIET_SEC * fs);
       this.out = { acc: 0, mot: 0, jerk: 0, vibV: 0, vibL: 0, speed: 0, dist: 0, moving: false, ppV: 0, ppL: 0 };
     }
     /** 움직이는 중에 시작했을 때: 처음 속력(m/s)을 정해 준다 */
     seed(v) { this.v = v; this.moving = true; this.peak = Math.abs(v); }
+    /** 지금 상태 그대로 복사 (분석 중 되돌아가 다시 계산할 때) */
+    clone() {
+      const c = Object.assign(Object.create(RideAnalyzer.prototype), this);
+      for (const k of ["lpAcc", "lpMot", "lpJ1", "lpJ2", "hpV", "hpL", "lpV", "lpL"]) c[k] = Object.assign(Object.create(Biquad.prototype), this[k]);
+      for (const k of ["ppV", "ppL"]) c[k] = Object.assign(Object.create(PeakToPeak.prototype), this[k], { list: this[k].list.slice() });
+      c.out = Object.assign({}, this.out);
+      return c;
+    }
+    /** 다음 push에서 정지(속력 0)로 판정될 상황인가 */
+    get stopNext() {
+      return this.moving && this.hold <= 0 && this.quiet >= this.quietN - 1 && Math.abs(this.v) < Math.max(P.STOP_ABS, P.STOP_RATIO * this.peak);
+    }
     /** 지금 서 있는가 (정지 판정 직전, 0.3초 이상 조용하고 속력이 거의 0인 경우 포함) */
     get still() {
       return !this.moving || (this.quiet >= 0.3 * this.fs && Math.abs(this.v) < Math.max(P.STOP_ABS, P.STOP_RATIO * this.peak));
@@ -208,7 +220,8 @@
       if (!quiet) this.v += vert * this.dt;
       if (Math.abs(mot) > P.MOVE) this.moving = true;
       if (this.moving) this.peak = Math.max(this.peak, Math.abs(this.v));
-      if (this.moving && this.quiet >= this.quietN && Math.abs(this.v) < Math.max(P.STOP_ABS, P.STOP_RATIO * this.peak)) {
+      if (this.hold > 0) this.hold--;
+      else if (this.moving && this.quiet >= this.quietN && Math.abs(this.v) < Math.max(P.STOP_ABS, P.STOP_RATIO * this.peak)) {
         this.v = 0; this.moving = false; this.peak = 0;
       }
       if (!this.moving && this.quiet >= this.quietN) { this.bias += P.BIAS_GAIN * vert; this.v = 0; }
@@ -325,6 +338,57 @@
     for (const g of groups) g.endCut = g.last < info.length - 1 && !g.endStill;   // 움직이는 중에 일시정지
     return { raw, groups };
   }
+  /** 너무 이른 정지 판정 찾기: 정지 직전 속력(vres)이 남아 있었고, 곧바로(6초 안) 같은 방향으로 더 감속해
+      그 감속량이 남은 속력으로 설명되면 → 사실은 저속으로 계속 움직이던 것 */
+  function prematureStop(speed, mot, moving, snaps, from, s, e, fs) {
+    const GAP = Math.round(6 * fs), qn = Math.round(P.QUIET_SEC * fs);
+    for (let r = Math.max(from, s + 1); r < e; r++) {
+      if (!(moving[r - 1] && !moving[r]) || !snaps.has(r)) continue;
+      const vres = snaps.get(r).v, d = Math.sign(vres);
+      if (Math.abs(vres) < 0.03) continue;
+      // 이번 운행의 방향 (최고 속력의 부호)
+      let pk = 0; for (let k = r - 1; k >= s && moving[k]; k--) if (Math.abs(speed[k]) > Math.abs(pk)) pk = speed[k];
+      if (Math.sign(pk) !== d) continue;
+      let k = r; while (k < Math.min(e, r + GAP) && Math.abs(mot[k]) <= P.MOVE) k++;
+      if (k >= Math.min(e, r + GAP) || Math.sign(mot[k]) !== -d) continue;
+      let j = k, I = 0;
+      for (;;) {
+        while (j < e && Math.sign(mot[j]) === -d && Math.abs(mot[j]) > P.DEAD) { I += mot[j] / fs; j++; }
+        let q = j; while (q < e && Math.abs(mot[q]) <= P.DEAD) q++;          // 잠깐 끊긴 같은 방향 감속은 이어서
+        if (q < e && q - j < qn && Math.sign(mot[q]) === -d) j = q; else break;
+      }
+      if (Math.abs(I) <= Math.max(1.6 * Math.abs(vres), Math.abs(vres) + 0.1)) return { r, hold: j - r + 2 };
+    }
+    return null;
+  }
+  /** 운행마다 감속 구간과 착상 구간 나누기 (2026-11-24 사용자 확정)
+      감속: 속력이 10 m/min보다 빠를 때 시작한 감속(2단 감속이면 둘 다). 착상: 마지막 감속이 풀린 뒤 저속 접근 ~ 꿀렁하며 멈출 때까지.
+      착상 구간은 기록·그래프에는 남기고 분석(최고 가감속도·저크·가감속 모양)에서는 뺀다. */
+  const LEV_V = 10;
+  function levelings(vert, speed, trips, fs) {
+    const out = [];
+    for (const [a, b] of trips) {
+      let pk = 0; for (let k = a; k <= b; k++) if (Math.abs(speed[k]) > Math.abs(pk)) pk = speed[k];
+      const d = Math.sign(pk);
+      if (!d || Math.abs(pk) <= LEV_V) { out.push(null); continue; }
+      const seg = Float64Array.from(vert.subarray ? vert.subarray(a, b + 1) : vert.slice(a, b + 1));
+      const med = percentile(Array.from(seg.subarray(0, Math.max(1, Math.round(0.5 * fs)))), .5);
+      const z = zp(Float64Array.from(seg, q => (q - med) * -d), 2, fs);      // 감속이 + 가 되도록
+      const regs = [];
+      for (let i = 0; i < z.length;) {
+        if (z[i] <= P.DEAD) { i++; continue; }
+        let j = i, m = 0; while (j < z.length && z[j] > P.DEAD) { m = Math.max(m, z[j]); j++; }
+        regs.push([i, j, m]); i = j;
+      }
+      let mx = 0; for (const r of regs) mx = Math.max(mx, r[2]);
+      const main = regs.filter(([i, , m]) => m >= Math.max(0.1, 0.25 * mx) && Math.abs(speed[a + i]) > LEV_V);
+      if (!main.length) { out.push(null); continue; }
+      const L = a + main[main.length - 1][1];
+      out.push(L < b ? [L, b] : null);
+      (out.dec || (out.dec = [])).push([a + main[0][0], L]);
+    }
+    return out;
+  }
   function analyze(vert, lat, fs = FS, segs) {
     const n = vert.length, hasLat = !!lat;
     const plan = planSegs(vert, n, segs, fs);
@@ -337,12 +401,23 @@
     let distOff = 0;
     for (const g of plan.groups) {
       const s = g.s, e = g.e;
-      const an = new RideAnalyzer(fs);          // 나뉜 구간마다 필터·속력 적분을 새로 시작
+      let an = new RideAnalyzer(fs);          // 나뉜 구간마다 필터·속력 적분을 새로 시작
       if (g.seed) an.seed(g.seed);
-      for (let i = s; i < e; i++) {
-        const o = an.push(vert[i], hasLat ? lat[i] : NaN);
-        S.acc[i] = o.acc; S.jerk[i] = o.jerk; S.vibV[i] = o.vibV; S.vibL[i] = hasLat ? o.vibL : NaN;
-        S.speed[i] = o.speed; S.dist[i] = distOff + o.dist; mot[i] = o.mot; moving[i] = o.moving ? 1 : 0;
+      // 1차로 돌린 뒤, 너무 일찍 '정지'로 판정한 곳(2단 감속의 중간 저속, 착상 직전 저속 접근)을 찾아
+      // 그 지점부터 속력을 버리지 않고 다시 계산한다. 느린 속도로 다가가다 감속하며 멈추는 착상 원리에 따른 것.
+      const snaps = new Map();
+      let from = s;
+      for (let guard = 0; guard < 40; guard++) {
+        for (let i = from; i < e; i++) {
+          if (an.stopNext) snaps.set(i, an.clone());
+          const o = an.push(vert[i], hasLat ? lat[i] : NaN);
+          S.acc[i] = o.acc; S.jerk[i] = o.jerk; S.vibV[i] = o.vibV; S.vibL[i] = hasLat ? o.vibL : NaN;
+          S.speed[i] = o.speed; S.dist[i] = distOff + o.dist; mot[i] = o.mot; moving[i] = o.moving ? 1 : 0;
+        }
+        const fix = prematureStop(S.speed, mot, moving, snaps, from, s, e, fs);
+        if (!fix) break;
+        an = snaps.get(fix.r).clone(); an.hold = fix.hold; from = fix.r;
+        for (const k of [...snaps.keys()]) if (k >= fix.r) snaps.delete(k);
       }
       if (e > s) distOff = S.dist[e - 1];
     }
@@ -390,15 +465,18 @@
     const vibL = hasLat ? ppStats(S.vibL, lMask, fs) : null;
 
     // 가속/감속: 움직임 방향 기준
+    const lev = levelings(vert, S.speed, trips, fs), levMask = new Uint8Array(n);
+    for (const L of lev) if (L) for (let k = L[0]; k <= L[1]; k++) levMask[k] = 1;
     let accMax = 0, decMax = 0, jerkMax = 0, up = 0, down = 0;
     for (let i = 0; i < n; i++) {
       const a = S.acc[i], v = S.speed[i];
+      if (v > up) up = v; if (-v > down) down = -v;
+      if (levMask[i]) continue;                 // 착상 구간은 가감속도·저크 분석에서 뺀다
       if (Math.abs(v) > 1.5 || moving[i]) {
         const dirSign = Math.abs(v) > 1.5 ? Math.sign(v) : Math.sign(a);
         if (a * dirSign > 0) accMax = Math.max(accMax, Math.abs(a)); else decMax = Math.max(decMax, Math.abs(a));
       }
       jerkMax = Math.max(jerkMax, Math.abs(S.jerk[i]));
-      if (v > up) up = v; if (-v > down) down = -v;
     }
     const m = {
       duration: n / fs, trips: trips.length,
@@ -406,9 +484,12 @@
       jerkMax, vibV, vibL, speedUp: up, speedDown: down, speedMax: Math.max(up, down),
       distance: n ? S.dist[n - 1] : 0, cruise: cruise.map(([a, b]) => [a / fs, b / fs]),
       pauses: plan.raw.slice(1).map(([s]) => s / fs),
+      level: lev.filter(Boolean).map(([a, b]) => [a / fs, b / fs]),          // 착상 구간 (분석 제외, 초)
+      decel: (lev.dec || []).map(([a, b]) => [a / fs, b / fs]),               // 감속 구간 (초)
     };
     // 일시정지로 잘린 운행은 가감속 모양 평가에서 뺀다 (최고 가감속도·속력·흔들림에는 그대로 쓴다)
-    m.ride = rideShape(vert, trips.filter((_, k) => !cutTrips.has(k)), fs, bounds);
+    const keep = trips.map((t, k) => k).filter(k => !cutTrips.has(k));
+    m.ride = rideShape(vert, keep.map(k => trips[k]), fs, bounds, keep.map(k => lev[k] && lev[k][0]));
     m.eval = evaluate(m);
     return { series: S, m };
   }
@@ -445,7 +526,7 @@
   const ramp = (v, lo, hi) => clamp01((v - lo) / (hi - lo));
 
   /** 운행 하나 (가속 → 감속) 분석. a: 수직 가속도(중력·바이어스 제거) */
-  function shapeOne(a, fs) {
+  function shapeOne(a, fs, levCut) {
     const n = a.length; if (n < fs * 3) return null;
     const a2 = zp(a, 2, fs), a5 = zp(a, 5, fs), j = grad(zp(a, 1.3, fs), fs), j5 = grad(a5, fs), s = grad(grad(a2, fs), fs);
     // 0.5초 창에서 거의 전부 |a| > 0.15 이면 '가감속 중'
@@ -479,7 +560,10 @@
     const tA = tm(pA), tD = tm(pD);
     let jerk = 0, stop = -1e9, kick = 0;
     for (let i = A0; i < D1; i++) jerk = Math.max(jerk, Math.abs(J[i]));
-    for (let i = mid; i < D1; i++) stop = Math.max(stop, J[i]);
+    // 멈출 때 저크는 마지막 감속 덩어리에서만 본다 (2단 감속이면 첫 감속을 푸는 순간은 '멈추기 직전'이 아니다)
+    let lastD = mid;
+    { let k = D1 - 1; while (k > mid && -x[k] < .2) k--; while (k > mid && -x[k] > .05 * Math.max(.2, -Math.min(...x.subarray(mid, D1)))) k--; lastD = k; }
+    for (let i = lastD; i < D1; i++) stop = Math.max(stop, J[i]);
     let jerkA = 0; for (let i = A0; i < mid; i++) jerkA = Math.max(jerkA, Math.abs(J[i]));
     // 출발 직전만 본다: 가속이 최고값의 10%에 이르기 전 0.6초 동안의 순간 저크
     let s10 = A0; for (let i = A0; i < mid; i++) if (x[i] >= .1 * acc) { s10 = i; break; }
@@ -492,7 +576,8 @@
     // 착상 구간 제외: 1차 감속으로 속력이 10 m/min 아래로 내려간 뒤의 감속 변화는 울렁임으로 보지 않는다
     let vv = 0, vpk = 0, kpk = A0; const vel = new Float64Array(n);
     for (let i = A0; i < n; i++) { vv += x[i] / fs * 60; vel[i] = vv; if (vv > vpk) { vpk = vv; kpk = i; } }
-    let Dlev = D1; for (let i = Math.max(kpk, mid); i < D1; i++) if (vel[i] <= 10) { Dlev = i; break; }
+    // (착상 구간을 이미 잘라 낸 경우엔 남은 감속 전체를 본다: 2단 감속의 두 번째 감속도 감속이다)
+    let Dlev = D1; if (!levCut) for (let i = Math.max(kpk, mid); i < D1; i++) if (vel[i] <= 10) { Dlev = i; break; }
     const pDl = pD.subarray(0, Math.max(2, Dlev - mid));
     const hA = hump(A0, mid), hD = hump(mid, Dlev);
     const extra = hA + hD - 4, extraA = hA - 2, extraD = hD - 2;
@@ -504,8 +589,15 @@
     const undA = proms(pA, 0, pA.length, .1)[1] || 0, undD = proms(pDl, 0, pDl.length, .1)[1] || 0;
     const sAbs = (lo, hi) => { let m = 0; for (let i = Math.max(0, lo); i < Math.min(n, hi); i++) m = Math.max(m, Math.abs(S[i])); return m; };
     const snap = [sAbs(i0 - F, i0 + F), sAbs(i0 + F / 2, mid), sAbs(mid, i1 - F / 2), sAbs(i1 - F, i1 + 1.5 * F)];
+    // 계단식 가속: 10%→90%로 오르는 사이에 15~65% 높이에서 0.6초 이상 평평하게 머무름 (약하게 가속하다가 강하게)
+    let shelfA = 0;
+    { const lo = first(pA, .1 * acc), hi = first(pA, .9 * acc); let run = 0;
+      for (let i = Math.max(0, lo); i < hi; i++) {
+        const q = pA[i], flat = Math.abs(J[A0 + i]) < .25 * Math.max(acc, .4);
+        run = q >= .15 * acc && q <= .65 * acc && flat ? run + 1 : 0; shelfA = Math.max(shelfA, run / fs);
+      } }
     const startCut = pA[0] > .1 * acc, endCut = pD[pD.length - 1] > .1 * dec;
-    return { dir: sg, acc, dec, jerk, jerkA, stop, kick, undA, undD, extraA, extraD, tA, tD, trA: trend(pA), trD: trend(pD), extra, hf, lobA, lobD, snap,
+    return { dir: sg, acc, dec, jerk, jerkA, stop, kick, shelfA, undA, undD, extraA, extraD, tA, tD, trA: trend(pA), trD: trend(pD), extra, hf, lobA, lobD, snap,
       relA: startCut ? null : engRel(pA), relD: endCut ? null : engRel(pD) };
   }
 
@@ -522,12 +614,13 @@
     if (r.lobA >= 2 || r.kick >= 3) { bad.push("bounce"); p += 8; }
     // 출렁: 가감속 중 2~5 Hz 잔물결이 크고 저크 봉우리도 여러 번 꺾여야 (둘 중 하나만으론 판정하지 않음)
     if ((r.hf >= .038 && r.extra >= 2) || r.hf >= .05) { bad.push("wave"); p += 8; }
-    else if ((r.undA >= .06 && !bad.includes("bounce")) || (r.undD >= .06 && !bad.includes("thud"))) {   // 가감속도 자체가 오르내림 (예: 한양티센1 감속)
-      const a = r.undA >= .06 && !bad.includes("bounce"), d = r.undD >= .06 && !bad.includes("thud");
+    else if ((r.undA >= .06 && !bad.includes("bounce")) || (r.undD >= .06 && !bad.includes("thud") && r.lobD < 2)) {   // 가감속도 자체가 오르내림 (예: 한양티센1 감속)
+      const a = r.undA >= .06 && !bad.includes("bounce"), d = r.undD >= .06 && !bad.includes("thud") && r.lobD < 2;   // 감속이 아예 두 덩이면 '2번 감속'으로
       bad.push(a && d ? "wobbleAD" : d ? "wobbleD" : "wobbleA"); p += 6;
     }
-    else if (r.extra >= 2 && !bad.includes("thud")) { bad.push("wobble"); p += 3; }
+    else if (r.extra - (r.lobD >= 2 ? 2 * (r.lobD - 1) : 0) >= 2 && !bad.includes("thud")) { bad.push("wobble"); p += 3; }   // 2번 감속으로 생긴 꺾임은 울렁임으로 세지 않음
     if (r.lobD >= 2 && !bad.includes("thud")) { bad.push("twice"); p += 5; }
+    if (r.shelfA >= .6 && !bad.includes("bounce")) { bad.push("stepA"); p += 5; }
     for (const v of r.snap) p += 3 * ramp(v, 5, 10) + 5 * ramp(v, 10, 20);      // 가가가속도: 모서리가 각질수록
     const slowA = r.relA == null ? 0 : 25 * ramp(r.relA, 1.5, 2.1);               // 꽉 잡았다가 스르르 (가속)
     const slowD = r.relD == null ? 0 : 25 * ramp(r.relD, 1.5, 2.1);               // 스르르 멈춤 (감속)
@@ -541,18 +634,28 @@
     return { score: Math.max(0, Math.round(100 - p)), bad, ch, jolt };
   }
 
-  function rideShape(vert, trips, fs, bounds) {
+  function rideShape(vert, trips, fs, bounds, levAt) {
     if (!trips.length) return null;
     const med = percentile(Array.from(vert), .5);
     let worst = null;
-    for (const [a, b] of trips) {
+    trips.forEach(([a, b], t) => {
       const sg = (bounds || [[0, vert.length]]).find(([s, e]) => a >= s && a < e) || [0, vert.length];
-      const lo = Math.max(sg[0], a - Math.round(1.5 * fs)), hi = Math.min(sg[1], b + Math.round(1.5 * fs));
-      const seg = Float64Array.from(vert.subarray ? vert.subarray(lo, hi) : vert.slice(lo, hi), q => q - med);
-      const r = shapeOne(seg, fs); if (!r) continue;
+      const lo = Math.max(sg[0], a - Math.round(1.5 * fs));
+      const L = levAt && levAt[t];
+      let seg;
+      if (L) {
+        // 착상 구간을 빼고, 감속이 끝난 자리에서 그대로 멈춘 것처럼 1.5초를 0으로 잇는다
+        const body = vert.subarray ? vert.subarray(lo, L) : vert.slice(lo, L);
+        seg = new Float64Array(body.length + Math.round(1.5 * fs));
+        for (let i = 0; i < body.length; i++) seg[i] = body[i] - med;
+      } else {
+        const hi = Math.min(sg[1], b + Math.round(1.5 * fs));
+        seg = Float64Array.from(vert.subarray ? vert.subarray(lo, hi) : vert.slice(lo, hi), q => q - med);
+      }
+      const r = shapeOne(seg, fs, !!L); if (!r) return;
       const jd = judgeOne(r); jd.dir = r.dir; jd._r = r;
       if (!worst || jd.score < worst.score) worst = jd;
-    }
+    });
     return worst;
   }
 
@@ -563,7 +666,7 @@
      흔들림(A95): ~8 아주 훌륭, ~10 좋음, ~20 일반적, ~30 좋지 않음, 그 이상 불쾌
      가감속 모양(가감속도+저크+가가가속도): 내부 점수 → 등급(훌륭/좋아요/무난/아쉬워요/점검) + 한마디 평
      속력: ~70 저속, ~130 중속, ~250 고속, ~500 초고속, 그 이상 '초고속의 초월' */
-  const EVAL_VER = 15;
+  const EVAL_VER = 16;
   function accGrade(a) {
     if (a <= 0.4) return { lv: 0, t: "거의 느껴지지 않을 만큼 순해요", s: "순해요" };
     if (a <= 0.7) return { lv: 1, t: "부드러워요", s: "부드러워요" };
@@ -619,6 +722,7 @@
     wobble: ["가감속 중에 살짝 울렁여요", "살짝 울렁이는 구간이 있어요"],
     wobbleA: ["가속이 울렁여요", "울렁울렁 가속해요"], wobbleD: ["감속이 울렁여요", "울렁울렁 감속해요"], wobbleAD: ["가속도 감속도 울렁여요"],
     twice: ["감속을 2번 하네요", "브레이크를 두 번에 나눠 밟아요"],
+    stepA: ["약하게 가속하다가 갑자기 세게 가속해요", "머뭇거리다 세게 치고 나가요"],
     slowStop: ["감속을 스르르 풀며 뜸 들이다 멈춰요", "멈출 듯 말 듯 스르르 멈춰요"],
     grabRelease: ["쑤욱 빨려 올라갔다가 스르르 놓아줘요"], grabReleaseDown: ["쑤욱 빨려 내려갔다가 스르르 놓아줘요"],
     easeSnap: ["슬며시 잡았다가 팍 놓아요"],
@@ -631,7 +735,7 @@
   function rideLine(R, m, vV, vL) {
     const seed = Math.floor((m.jerkMax + m.accPeak + m.distance) * 997);
     const pick = (k, i) => { const arr = RIDE_TXT[(k === "pull" || k === "grabRelease") && R.dir < 0 ? k + "Down" : k]; return arr[(seed + i) % arr.length]; };
-    const ORDER = ["bounce", "pull", "firm", "softFirm", "grabRelease", "easeSnap", "wobbleA", "wave", "wobble", "wobbleAD", "twice", "wobbleD", "fadeBrake", "slowStop", "thud"];
+    const ORDER = ["bounce", "stepA", "pull", "firm", "softFirm", "grabRelease", "easeSnap", "wobbleA", "wave", "wobble", "wobbleAD", "twice", "wobbleD", "fadeBrake", "slowStop", "thud"];
     const keys = [...R.bad.slice(0, 3), ...R.ch.slice(0, Math.max(0, 2 - R.bad.length))].sort((x, y) => ORDER.indexOf(x) - ORDER.indexOf(y));
     if (!keys.length && R.score >= 95) keys.push("great");
     const parts = keys.map((k, i) => pick(k, i));
