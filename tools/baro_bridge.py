@@ -4,14 +4,19 @@
 웹 브라우저는 휴대폰 기압계를 읽을 수 없어서, Termux가 대신 읽어 브라우저에 넘겨 준다.
   1) 이 파일이 있는 elMotion 폴더를 http://localhost:8080 으로 열어 준다 (휴대폰 안에서만).
   2) termux-sensor 로 기압계를 읽어 /baro 주소로 실시간 전달한다 (Server-Sent Events).
-elMotion은 localhost 로 열렸을 때만 /baro 에 연결하고, 설정의 '기압계 오차 보정'이 켜진다.
+
+배터리 절약 (자동 켜기·끄기):
+  · 기압계는 elMotion이 열려 연결돼 있을 때만 읽는다. 연결이 끊기면 5초 뒤 기압계를 끈다.
+  · elMotion이 2분 동안 연결되지 않으면 중계기도 스스로 끝난다. (--stay 를 붙이면 계속 켜 둠)
+  · 홈 화면 버튼으로 켜기: tools/install_shortcut.sh 참고 (Termux:Widget)
 
 필요한 것: F-Droid의 Termux + Termux:API 앱, 그리고 Termux에서
     pkg install python termux-api
 실행:
-    python tools/baro_bridge.py            # 기압계를 자동으로 찾음
-    python tools/baro_bridge.py "센서 이름"  # 자동으로 못 찾으면 termux-sensor -l 로 이름 확인 후 직접 지정
-    python tools/baro_bridge.py --fake     # 기압계 없이 가짜 값으로 시험 (PC에서도 가능)
+    python elMotion/tools/baro_bridge.py              # 기압계를 자동으로 찾음
+    python elMotion/tools/baro_bridge.py "센서 이름"    # 자동으로 못 찾으면 termux-sensor -l 로 이름 확인 후 직접 지정
+    python elMotion/tools/baro_bridge.py --port 8090  # 8080번을 다른 앱이 쓰고 있을 때
+    python elMotion/tools/baro_bridge.py --fake       # 기압계 없이 가짜 값으로 시험 (PC에서도 가능)
 """
 import json
 import math
@@ -26,9 +31,17 @@ from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 PORT = 8080
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))   # tools/ 의 위 = elMotion 폴더
 KEYS = ("pressure", "baro", "bmp", "lps", "press")
+SENSOR_OFF_AFTER = float(os.environ.get("BRIDGE_SENSOR_OFF", 5))     # 연결이 끊긴 뒤 기압계를 끄기까지 (초)
+EXIT_AFTER = float(os.environ.get("BRIDGE_EXIT", 120))               # 연결이 없을 때 중계기를 끝내기까지 (초)
 
 latest = {"p": None, "n": 0}
 cond = threading.Condition()
+state = {"clients": 0, "last": time.time(), "proc": None, "seen": False}
+lock = threading.Lock()
+
+
+def log(msg):
+    print(time.strftime("[%H:%M:%S] ") + msg, flush=True)
 
 
 def publish(p):
@@ -55,37 +68,72 @@ def find_sensor():
     print("기압계를 찾지 못했어요. 이 휴대폰의 센서 목록:")
     for name in names:
         print("  -", name)
-    sys.exit('기압 센서 이름을 직접 넣어 실행해 주세요: python tools/baro_bridge.py "센서 이름"')
+    sys.exit('기압 센서 이름을 직접 넣어 실행해 주세요: python elMotion/tools/baro_bridge.py "센서 이름"')
 
 
-def read_sensor(name):
+def pump(proc):
     """termux-sensor 출력(여러 줄 JSON 덩어리)을 읽어 기압(hPa)만 꺼낸다."""
+    buf, depth = [], 0
+    for line in proc.stdout:
+        for ch in line:
+            if ch == "{":
+                depth += 1
+            if depth > 0:
+                buf.append(ch)
+            if ch == "}":
+                depth -= 1
+                if depth == 0 and buf:
+                    try:
+                        obj = json.loads("".join(buf))
+                        for v in obj.values():
+                            vals = v.get("values") if isinstance(v, dict) else None
+                            if vals:
+                                publish(float(vals[0]))
+                                break
+                    except ValueError:
+                        pass
+                    buf = []
+
+
+def sensor_on(name):
+    proc = subprocess.Popen(["termux-sensor", "-s", name, "-d", "100"],
+                            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, bufsize=1)
+    threading.Thread(target=pump, args=(proc,), daemon=True).start()
+    return proc
+
+
+def sensor_off(proc):
+    try:
+        proc.terminate()
+        proc.wait(timeout=3)
+    except Exception:
+        pass
+    subprocess.run(["termux-sensor", "-c"], capture_output=True)      # 센서 놓아주기
+
+
+def manager(name, stay):
+    """연결된 화면이 있을 때만 기압계를 켜고, 오래 연결이 없으면 중계기를 끝낸다."""
     while True:
-        proc = subprocess.Popen(["termux-sensor", "-s", name, "-d", "100"],
-                                stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, bufsize=1)
-        buf, depth = [], 0
-        for line in proc.stdout:
-            for ch in line:
-                if ch == "{":
-                    depth += 1
-                if depth > 0:
-                    buf.append(ch)
-                if ch == "}":
-                    depth -= 1
-                    if depth == 0 and buf:
-                        try:
-                            obj = json.loads("".join(buf))
-                            for v in obj.values():
-                                vals = v.get("values") if isinstance(v, dict) else None
-                                if vals:
-                                    publish(float(vals[0]))
-                                    break
-                        except ValueError:
-                            pass
-                        buf = []
-        proc.wait()
-        print("센서 읽기가 끊겨 다시 시작해요…")
         time.sleep(1)
+        with lock:
+            clients, idle = state["clients"], time.time() - state["last"]
+            proc = state["proc"]
+        want = clients > 0 or (state["seen"] and idle < SENSOR_OFF_AFTER)
+        if name:
+            if want and (proc is None or proc.poll() is not None):
+                with lock:
+                    state["proc"] = sensor_on(name)
+                log("elMotion이 연결돼 기압계를 켰어요.")
+            elif not want and proc is not None:
+                sensor_off(proc)
+                with lock:
+                    state["proc"] = None
+                log("elMotion 연결이 끊겨 기압계를 껐어요.")
+        if not stay and clients == 0 and idle >= EXIT_AFTER:
+            log(f"elMotion이 {int(EXIT_AFTER)}초 동안 열리지 않아 중계기를 끝낼게요.")
+            if name and state["proc"] is not None:
+                sensor_off(state["proc"])
+            os._exit(0)
 
 
 def fake_sensor():
@@ -119,7 +167,11 @@ class Handler(SimpleHTTPRequestHandler):
         self.send_header("Content-Type", "text/event-stream")
         self.send_header("Connection", "keep-alive")
         self.end_headers()
-        seen = -1
+        with lock:
+            state["clients"] += 1
+            state["last"] = time.time()
+            state["seen"] = True
+        seen = latest["n"]
         try:
             while True:
                 with cond:
@@ -133,38 +185,66 @@ class Handler(SimpleHTTPRequestHandler):
                 self.wfile.flush()
         except (BrokenPipeError, ConnectionResetError, OSError):
             return
+        finally:
+            with lock:
+                state["clients"] -= 1
+                state["last"] = time.time()
 
     def log_message(self, *a):
         pass
 
 
 def main():
+    global PORT
     args = sys.argv[1:]
-    if "--fake" in args:
+    if "--port" in args:
+        k = args.index("--port")
+        PORT = int(args[k + 1])
+        del args[k:k + 2]
+    stay = "--stay" in args
+    fake = "--fake" in args
+    args = [a for a in args if a not in ("--stay", "--fake")]
+
+    try:
+        server = ThreadingHTTPServer(("127.0.0.1", PORT), Handler)
+    except OSError:
+        # 이미 켜져 있는 게 우리 중계기인지 확인
+        mine = False
+        try:
+            import urllib.request
+            with urllib.request.urlopen(f"http://127.0.0.1:{PORT}/baro", timeout=4) as r:
+                mine = "event-stream" in r.headers.get("Content-Type", "")
+        except Exception:
+            pass
+        if mine:
+            print(f"중계기가 이미 켜져 있어요. 크롬에서 http://localhost:{PORT} 을 그대로 쓰면 돼요.")
+            print("새로 켜고 싶으면:  pkill -f baro_bridge.py  를 입력한 뒤 다시 실행해 주세요.")
+        else:
+            print(f"{PORT}번 주소를 다른 앱이 쓰고 있어요. 다른 번호로 켜 주세요:")
+            print("    python elMotion/tools/baro_bridge.py --port 8090")
+            print("(주소가 바뀌면 크롬에서도 http://localhost:8090 으로 열어야 하고, 기록은 주소마다 따로 저장돼요)")
+        os._exit(1)
+
+    if fake:
         threading.Thread(target=fake_sensor, daemon=True).start()
-        src = "가짜 기압 (시험용)"
+        name = None
+        log("기압 센서: 가짜 기압 (시험용)")
     else:
         name = args[0] if args else find_sensor()
-        threading.Thread(target=read_sensor, args=(name,), daemon=True).start()
-        src = name
-    print(f"기압 센서: {src}")
+        log(f"기압 센서: {name}")
+    threading.Thread(target=manager, args=(name, stay), daemon=True).start()
     print(f"크롬에서 http://localhost:{PORT} 을 열어 주세요. (끝내려면 Ctrl+C)")
-
-    def show():
-        while True:
-            time.sleep(5)
-            if latest["p"] is not None:
-                print(f"  지금 기압 {latest['p']:.2f} hPa")
-            else:
-                print("  아직 기압 값을 받지 못했어요…")
-    threading.Thread(target=show, daemon=True).start()
+    if not stay:
+        print(f"elMotion을 닫고 {int(EXIT_AFTER)}초가 지나면 중계기도 저절로 꺼져요.", flush=True)
     try:
-        ThreadingHTTPServer(("127.0.0.1", PORT), Handler).serve_forever()
+        server.serve_forever()
     except KeyboardInterrupt:
         pass
     finally:
-        if "--fake" not in args:
-            subprocess.run(["termux-sensor", "-c"], capture_output=True)
+        with lock:
+            proc = state["proc"]
+        if proc is not None:
+            sensor_off(proc)
 
 
 if __name__ == "__main__":
