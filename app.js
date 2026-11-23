@@ -5,6 +5,7 @@
 const FS = Core.FS;
 const LEGEND = { acc: 1.5, lat: 30, spd: 600 };        // 물 높이 범례 (화면에 표시하지 않음)
 const CUT = Math.round(Core.P.CUT_SEC * FS);
+const CUT_MANUAL = Math.round(0.3 * FS);   // 수동 모드 종료 시 버려지는 마지막 0.3초
 const LIVE_WIN = FS * 10;
 
 /* ───────── 공통 도구 ───────── */
@@ -478,7 +479,9 @@ const ctl = {
     this.unlockScreen();
     const baroSamples = baro.stop();
     const demo = !!this.demo; this.stopDemo();
-    const n = reason === "abnormal" ? Math.max(0, this.vert.length - CUT) : this.vert.length;
+    // 비정상 흔들림: 감지 0.2초 전까지 / 수동 모드에서 버튼으로 끝낼 때: 버튼을 누르며 생긴 흔들림을 빼려고 0.3초 전까지
+    const cut = reason === "abnormal" ? CUT : this.mode === "manual" ? CUT_MANUAL : 0;
+    const n = Math.max(0, this.vert.length - cut);
     home.render();
     if (n < FS) { toast("측정 시간이 너무 짧아 저장하지 않았어요."); return; }
     if (reason === "abnormal") { toast("비정상적인 흔들림이 감지되어 측정을 종료했어요.", 4200); try { navigator.vibrate && navigator.vibrate(60); } catch (e) { /* 무시 */ } }
