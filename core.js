@@ -392,23 +392,31 @@
     for (let i = A0; i < D1; i++) jerk = Math.max(jerk, Math.abs(J[i]));
     for (let i = mid; i < D1; i++) stop = Math.max(stop, J[i]);
     let jerkA = 0; for (let i = A0; i < mid; i++) jerkA = Math.max(jerkA, Math.abs(J[i]));
-    for (let i = Math.max(0, on - Math.round(.3 * fs)); i < Math.min(n, on + Math.round(.4 * fs)); i++) kick = Math.max(kick, Math.abs(j5[i] * sg));
+    // 출발 직전만 본다: 가속이 최고값의 10%에 이르기 전 0.6초 동안의 순간 저크
+    let s10 = A0; for (let i = A0; i < mid; i++) if (x[i] >= .1 * acc) { s10 = i; break; }
+    for (let i = Math.max(0, s10 - Math.round(.6 * fs)); i <= s10; i++) kick = Math.max(kick, Math.abs(j5[i] * sg));
     const F = Math.round(fs);
     // 저크 잡음 수준(운행 한가운데 정속 구간)에 맞춰 봉우리 기준을 올린다: 센서 잡음을 울렁임으로 오인하지 않게
     let js = 0, jn = 0; for (let i = Math.max(0, mid - F); i < Math.min(n, mid + F); i++) { js += J[i] * J[i]; jn++; }
     const jNoise = jn ? Math.sqrt(js / jn) : 0, hH = Math.max(.15, 4 * jNoise), hP = Math.max(HUMP_PR, 4 * jNoise);
     const hump = (lo, hi) => peaks(J, lo, hi, hH, hP, 1) + peaks(J, lo, hi, hH, hP, -1);
-    const extra = hump(A0, mid) + hump(mid, D1) - 4;
+    // 착상 구간 제외: 1차 감속으로 속력이 10 m/min 아래로 내려간 뒤의 감속 변화는 울렁임으로 보지 않는다
+    let vv = 0, vpk = 0, kpk = A0; const vel = new Float64Array(n);
+    for (let i = A0; i < n; i++) { vv += x[i] / fs * 60; vel[i] = vv; if (vv > vpk) { vpk = vv; kpk = i; } }
+    let Dlev = D1; for (let i = Math.max(kpk, mid); i < D1; i++) if (vel[i] <= 10) { Dlev = i; break; }
+    const pDl = pD.subarray(0, Math.max(2, Dlev - mid));
+    const hA = hump(A0, mid), hD = hump(mid, Dlev);
+    const extra = hA + hD - 4, extraA = hA - 2, extraD = hD - 2;
     let hs = 0, hn = 0, hm = 0;
     for (let i = 0; i < pA.length; i++) if (pA[i] >= .3 * acc) { const q = a5[A0 + i] - a2[A0 + i]; hs += q * q; hm += q; hn++; }
     const hf = hn ? Math.sqrt(Math.max(0, hs / hn - (hm / hn) ** 2)) : 0;
-    const lobA = peaks(pA, 0, pA.length, .2, .12), lobD = peaks(pD, 0, pD.length, .2, .12);
+    const lobA = peaks(pA, 0, pA.length, .2, .12), lobD = peaks(pDl, 0, pDl.length, .2, .12);
     // 가감속도의 출렁임: 가속·감속 봉우리 안에서 두 번째로 큰 봉우리의 돌출도 (m/s²)
-    const undA = proms(pA, 0, pA.length, .1)[1] || 0, undD = proms(pD, 0, pD.length, .1)[1] || 0;
+    const undA = proms(pA, 0, pA.length, .1)[1] || 0, undD = proms(pDl, 0, pDl.length, .1)[1] || 0;
     const sAbs = (lo, hi) => { let m = 0; for (let i = Math.max(0, lo); i < Math.min(n, hi); i++) m = Math.max(m, Math.abs(S[i])); return m; };
     const snap = [sAbs(i0 - F, i0 + F), sAbs(i0 + F / 2, mid), sAbs(mid, i1 - F / 2), sAbs(i1 - F, i1 + 1.5 * F)];
     const startCut = pA[0] > .1 * acc, endCut = pD[pD.length - 1] > .1 * dec;
-    return { dir: sg, acc, dec, jerk, jerkA, stop, kick, undA, undD, tA, tD, trA: trend(pA), trD: trend(pD), extra, hf, lobA, lobD, snap,
+    return { dir: sg, acc, dec, jerk, jerkA, stop, kick, undA, undD, extraA, extraD, tA, tD, trA: trend(pA), trD: trend(pD), extra, hf, lobA, lobD, snap,
       relA: startCut ? null : engRel(pA), relD: endCut ? null : engRel(pD) };
   }
 
@@ -424,7 +432,11 @@
     if (r.stop >= 1.3) { bad.push("thud"); p += 8; }
     if (r.lobA >= 2 || r.kick >= 3) { bad.push("bounce"); p += 8; }
     // 출렁: 가감속 중 2~5 Hz 잔물결이 크고 저크 봉우리도 여러 번 꺾여야 (둘 중 하나만으론 판정하지 않음)
-    if ((r.hf >= .038 && r.extra >= 3) || r.hf >= .05) { bad.push("wave"); p += 8; }
+    if ((r.hf >= .038 && r.extra >= 2) || r.hf >= .05) { bad.push("wave"); p += 8; }
+    else if ((r.undA >= .06 && !bad.includes("bounce")) || (r.undD >= .06 && !bad.includes("thud"))) {   // 가감속도 자체가 오르내림 (예: 한양티센1 감속)
+      const a = r.undA >= .06 && !bad.includes("bounce"), d = r.undD >= .06 && !bad.includes("thud");
+      bad.push(a && d ? "wobbleAD" : d ? "wobbleD" : "wobbleA"); p += 6;
+    }
     else if (r.extra >= 2 && !bad.includes("thud")) { bad.push("wobble"); p += 3; }
     if (r.lobD >= 2 && !bad.includes("thud")) { bad.push("twice"); p += 5; }
     for (const v of r.snap) p += 3 * ramp(v, 5, 10) + 5 * ramp(v, 10, 20);      // 가가가속도: 모서리가 각질수록
@@ -461,7 +473,7 @@
      흔들림(A95): ~8 아주 훌륭, ~10 좋음, ~20 일반적, ~30 좋지 않음, 그 이상 불쾌
      가감속 모양(가감속도+저크+가가가속도): 내부 점수 → 등급(훌륭/좋아요/무난/아쉬워요/점검) + 한마디 평
      속력: ~70 저속, ~130 중속, ~250 고속, ~500 초고속, 그 이상 '초고속의 초월' */
-  const EVAL_VER = 9;
+  const EVAL_VER = 11;
   function accGrade(a) {
     if (a <= 0.4) return { lv: 0, t: "거의 느껴지지 않을 만큼 순해요", s: "순해요" };
     if (a <= 0.7) return { lv: 1, t: "부드러워요", s: "부드러워요" };
@@ -512,9 +524,10 @@
   }
   const RIDE_TXT = {
     thud: ["멈추기 직전에 덜컹해요", "마지막에 쿵 하고 내려앉아요"],
-    bounce: ["출발이 쿵 하고 튀어요", "출발하자마자 한 번 튀어 올라요"],
+    bounce: ["출발이 쿵 하고 튀어요", "출발할 때 쿵 하고 튀어요"],
     wave: ["출렁출렁, 가감속이 물결쳐요", "출렁이며 달려요"],
     wobble: ["가감속 중에 살짝 울렁여요", "살짝 울렁이는 구간이 있어요"],
+    wobbleA: ["가속이 울렁여요", "울렁울렁 가속해요"], wobbleD: ["감속이 울렁여요", "울렁울렁 감속해요"], wobbleAD: ["가속도 감속도 울렁여요"],
     twice: ["감속을 2번 하네요", "브레이크를 두 번에 나눠 밟아요"],
     slowStop: ["감속을 스르르 풀며 뜸 들이다 멈춰요", "멈출 듯 말 듯 스르르 멈춰요"],
     grabRelease: ["쑤욱 빨려 올라갔다가 스르르 놓아줘요"], grabReleaseDown: ["쑤욱 빨려 내려갔다가 스르르 놓아줘요"],
@@ -528,8 +541,8 @@
   function rideLine(R, m, vV, vL) {
     const seed = Math.floor((m.jerkMax + m.accPeak + m.distance) * 997);
     const pick = (k, i) => { const arr = RIDE_TXT[(k === "pull" || k === "grabRelease") && R.dir < 0 ? k + "Down" : k]; return arr[(seed + i) % arr.length]; };
-    const ORDER = ["bounce", "pull", "firm", "softFirm", "grabRelease", "easeSnap", "wave", "wobble", "twice", "fadeBrake", "slowStop", "thud"];
-    const keys = [...R.bad.slice(0, 2), ...R.ch.slice(0, Math.max(0, 2 - R.bad.length))].sort((x, y) => ORDER.indexOf(x) - ORDER.indexOf(y));
+    const ORDER = ["bounce", "pull", "firm", "softFirm", "grabRelease", "easeSnap", "wobbleA", "wave", "wobble", "wobbleAD", "twice", "wobbleD", "fadeBrake", "slowStop", "thud"];
+    const keys = [...R.bad.slice(0, 3), ...R.ch.slice(0, Math.max(0, 2 - R.bad.length))].sort((x, y) => ORDER.indexOf(x) - ORDER.indexOf(y));
     if (!keys.length && R.score >= 95) keys.push("great");
     const parts = keys.map((k, i) => pick(k, i));
     const grade = rideGrade(R.score);
