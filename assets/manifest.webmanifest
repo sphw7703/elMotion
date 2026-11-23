@@ -1,0 +1,17 @@
+{
+  "id": "./",
+  "name": "엘모션",
+  "short_name": "엘모션",
+  "description": "엘리베이터 승차감 측정",
+  "lang": "ko",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0F1838",
+  "theme_color": "#E9EDF5",
+  "icons": [
+    { "src": "assets/app-icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "assets/app-icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" }
+  ]
+}
