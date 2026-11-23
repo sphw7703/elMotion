@@ -320,11 +320,16 @@ function analysisOf(rec) {
   }
   return cache.get(k);
 }
+/** 목록 한줄평: 맨 앞 한 문장만 ("우당탕탕!"은 다음 문장과 함께) */
+function firstSentence(t) {
+  const m = String(t || "").match(/^(우당탕탕!\s*)?[^.!?]*[.!?]/);
+  return m ? m[0].trim() : String(t || "");
+}
 function metaOf(rec) {
   const m = analysisOf(rec).m;
   return {
     id: rec.id, name: rec.name || "", startedAt: rec.startedAt, duration: m.duration, demo: !!rec.demo, imported: !!rec.imported, hasLat: !!rec.lat,
-    accPeak: m.accPeak, latA95: m.vibL ? m.vibL.a95 : null, speedMax: m.speedMax, overall: m.eval.overall, updatedAt: rec.updatedAt || Date.now(), evalVer: Core.EVAL_VER,
+    accPeak: m.accPeak, accMax: m.accMax, decMax: m.decMax, latA95: m.vibL ? m.vibL.a95 : null, speedMax: m.speedMax, overall: m.eval.overall, updatedAt: rec.updatedAt || Date.now(), evalVer: Core.EVAL_VER,
   };
 }
 const store = {
@@ -593,17 +598,18 @@ const records = {
     list.classList.toggle("selecting", !!this.selecting);
     list.innerHTML = this.items.map((m, k) => {
       const lv = (v, key) => (v > 0 ? clamp(v / LEGEND[key], 0.06, 1) : 0) * 100;
-      const lat = m.latA95 == null ? "—" : m.latA95.toFixed(0);
+      const lat = m.latA95 == null ? "—" : m.latA95.toFixed(1);
+      const fitMini = t => (t.length >= 6 ? ' style="font-size:10.5px"' : t.length === 5 ? ' style="font-size:12px"' : "");   // 239.6처럼 긴 숫자는 원 안에 들어가게 줄임
       return `<article class="rec-card glass ${this.sel.has(m.id) ? "sel" : ""} ${this.anchor === k ? "anchor" : ""}" data-id="${esc(m.id)}" data-k="${k}" tabindex="0">
         <div class="rc-head"><span class="check"></span>
           <div class="t"><div class="rc-name">${esc(m.name || fmtDate(m.startedAt))}${m.demo ? '<span class="tag">데모</span>' : ""}${m.imported ? '<span class="tag">가져옴</span>' : ""}</div>
           <div class="rc-date">${m.name ? fmtDate(m.startedAt) + " · " : ""}${fmtDur(m.duration)}</div></div>
           <button class="ic-btn pop" data-act="edit" aria-label="이름 변경">${ICON.edit}</button></div>
         <div class="rc-body"><div class="minis">
-          <div class="mini k-acc" style="--lv:${lv(m.accPeak, "acc")}%"><b>${m.accPeak.toFixed(2)}</b></div>
-          <div class="mini k-lat" style="--lv:${m.latA95 == null ? 0 : lv(m.latA95, "lat")}%"><b>${lat}</b></div>
-          <div class="mini k-spd" style="--lv:${lv(m.speedMax, "spd")}%"><b>${m.speedMax.toFixed(0)}</b></div></div>
-          <div class="rc-line">${esc(m.overall)}</div></div></article>`;
+          <div class="mini k-acc" style="--lv:${lv(m.accPeak, "acc")}%"><span class="ms two"><b>${(m.accMax ?? m.accPeak).toFixed(2)}</b><b>${(m.decMax ?? m.accPeak).toFixed(2)}</b><i>m/s²</i></span></div>
+          <div class="mini k-lat" style="--lv:${m.latA95 == null ? 0 : lv(m.latA95, "lat")}%"><span class="ms"><b${fitMini(lat)}>${lat}</b><i>${m.latA95 == null ? "" : "gal"}</i></span></div>
+          <div class="mini k-spd" style="--lv:${lv(m.speedMax, "spd")}%"><span class="ms"><b${fitMini(m.speedMax.toFixed(1))}>${m.speedMax.toFixed(1)}</b><i>m/min</i></span></div></div>
+          <div class="rc-line">${esc(firstSentence(m.overall))}</div></div></article>`;
     }).join("");
     stagger(list, 12);
     list.querySelectorAll(".rec-card").forEach(card => {
