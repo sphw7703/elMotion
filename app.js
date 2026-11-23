@@ -634,6 +634,7 @@ const records = {
   },
   renderBar() {
     let bar = $("#selBar");
+    document.body.classList.toggle("selecting", !!this.selecting);
     if (!this.selecting) { if (bar) bar.remove(); return; }
     if (!bar) { bar = document.createElement("div"); bar.id = "selBar"; bar.className = "select-bar"; document.body.appendChild(bar); }
     const all = this.items.length && this.sel.size === this.items.length;
