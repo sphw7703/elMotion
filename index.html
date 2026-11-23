@@ -84,7 +84,8 @@ button:focus-visible, [tabindex]:focus-visible, input:focus-visible { outline: 2
 .sphere .stack { display: flex; flex-direction: column; align-items: flex-end; }
 .sphere .n { font-family: "NanumSquareNeo", sans-serif; font-weight: 800; font-size: calc(var(--d) * .25 * var(--k, 1)); line-height: .92; letter-spacing: -.02em; color: #fff;
   font-variant-numeric: tabular-nums; text-shadow: calc(var(--d) * .008) calc(var(--d) * .012) calc(var(--d) * .022) rgba(14, 20, 62, .38); }
-.sphere .stack.two .n { font-size: calc(var(--d) * .2 * var(--k, 1)); line-height: .98; }
+.sphere .stack.two .n { font-size: calc(var(--d) * .2 * var(--k, 1)); line-height: .98; transform: translateX(calc(var(--d) * -.05)); }
+.sphere .stack.two .u { transform: translateX(calc(var(--d) * .05)); }
 .sphere .u { font-family: "NanumSquareNeo", sans-serif; font-weight: 100; font-size: calc(var(--d) * .15); line-height: 1; margin-top: calc(var(--d) * .005); color: rgba(255, 255, 255, .88);
   text-shadow: calc(var(--d) * .006) calc(var(--d) * .009) calc(var(--d) * .016) rgba(14, 20, 62, .3); }
 .sphere.k-acc { --wl: #6E80D4; --wm: #2C46BE; --wd: #17289A; }

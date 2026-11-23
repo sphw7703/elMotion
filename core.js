@@ -448,7 +448,7 @@
      흔들림(A95): ~8 아주 훌륭, ~10 좋음, ~20 일반적, ~30 좋지 않음, 그 이상 불쾌
      가감속 모양(가감속도+저크+가가가속도): 내부 점수 → 등급(훌륭/좋아요/무난/아쉬워요/점검) + 한마디 평
      속력: ~70 저속, ~130 중속, ~250 고속, ~500 초고속, 그 이상 '초고속의 초월' */
-  const EVAL_VER = 7;
+  const EVAL_VER = 8;
   function accGrade(a) {
     if (a <= 0.4) return { lv: 0, t: "거의 느껴지지 않을 만큼 순해요", s: "순해요" };
     if (a <= 0.7) return { lv: 1, t: "부드러워요", s: "부드러워요" };
@@ -512,7 +512,6 @@
     softFirm: ["부드러우면서도 단단해요"],
     great: ["군더더기 없는 가감속이에요", "물 위를 미끄러지듯 움직여요"],
   };
-  const GRADE_TXT = { "훌륭해요": "승차감이 훌륭해요.", "좋아요": "승차감이 좋아요.", "무난해요": "승차감은 무난해요.", "아쉬워요": "승차감이 조금 아쉬워요.", "점검이 필요해요": "점검이 필요해 보여요." };
   function rideLine(R, m, vV, vL) {
     const seed = Math.floor((m.jerkMax + m.accPeak + m.distance) * 997);
     const pick = (k, i) => { const arr = RIDE_TXT[(k === "pull" || k === "grabRelease") && R.dir < 0 ? k + "Down" : k]; return arr[(seed + i) % arr.length]; };
@@ -521,7 +520,7 @@
     if (!keys.length && R.score >= 95) keys.push("great");
     const parts = keys.map((k, i) => pick(k, i));
     const grade = rideGrade(R.score);
-    let line = (R.bad.length >= 3 || R.score < 55 ? "우당탕탕! " : "") + (parts.length ? parts.join(". ") + ". " : "") + GRADE_TXT[grade];
+    let line = (R.bad.length >= 3 || R.score < 55 ? "우당탕탕! " : "") + grade + "." + (parts.length ? " " + parts.join(". ") + "." : "");
     const vib = [];
     if (vV.lv >= 2) vib.push("위아래"); if (vL && vL.lv >= 2) vib.push("좌우");
     if (vib.length) line += ` ${vib.join("·")} 흔들림도 조금 느껴져요.`;
