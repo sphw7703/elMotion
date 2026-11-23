@@ -312,48 +312,224 @@
       jerkMax, vibV, vibL, speedUp: up, speedDown: down, speedMax: Math.max(up, down),
       distance: n ? S.dist[n - 1] : 0,
     };
+    m.ride = rideShape(vert, trips, fs);
     m.eval = evaluate(m);
     return { series: S, m };
   }
 
+  /* ───────── 가감속 모양 분석 (가감속도 + 저크 + 가가가속도) ─────────
+     2026-11-23 예시 10개 파일(배곧·광운대·월계·월곡·금호·장교·인창1·인창4·Cv60·부평)로 맞춘 판정.
+     점수는 내부 계산용이고 화면에는 등급과 한마디 평만 나간다. */
+  function zp(x, fc, fs) {            // 0위상 2차 저역통과 (앞뒤로 한 번씩)
+    const n = x.length, pad = Math.min(n - 1, Math.round(fs * 1.5));
+    const ext = new Float64Array(n + 2 * pad);
+    for (let i = 0; i < pad; i++) { ext[i] = 2 * x[0] - x[pad - i]; ext[n + pad + i] = 2 * x[n - 1] - x[n - 2 - i]; }
+    for (let i = 0; i < n; i++) ext[pad + i] = x[i];
+    const run = (arr) => { const f = Biquad.make(fc, fs, false); const y0 = arr[0]; f.x1 = f.x2 = f.y1 = f.y2 = y0; for (let i = 0; i < arr.length; i++) arr[i] = f.process(arr[i]); };
+    run(ext); ext.reverse(); run(ext); ext.reverse();
+    return ext.subarray(pad, pad + n);
+  }
+  function grad(x, fs) {
+    const n = x.length, y = new Float64Array(n);
+    for (let i = 0; i < n; i++) y[i] = i === 0 ? (x[1] - x[0]) * fs : i === n - 1 ? (x[n - 1] - x[n - 2]) * fs : (x[i + 1] - x[i - 1]) * fs / 2;
+    return y;
+  }
+  /** 봉우리 개수 (높이 h 이상, 돌출도 pr 이상) */
+  function peaks(x, lo, hi, h, pr, sign = 1) {
+    let c = 0;
+    for (let i = lo + 1; i < hi - 1; i++) {
+      const v = sign * x[i];
+      if (v < h || !(v > sign * x[i - 1] && v >= sign * x[i + 1])) continue;
+      let lm = v, k = i - 1; while (k >= lo && sign * x[k] <= v) { lm = Math.min(lm, sign * x[k]); k--; }
+      let rm = v; k = i + 1; while (k < hi && sign * x[k] <= v) { rm = Math.min(rm, sign * x[k]); k++; }
+      if (v - Math.max(lm, rm) >= pr) c++;
+    }
+    return c;
+  }
+  const ramp = (v, lo, hi) => clamp01((v - lo) / (hi - lo));
+
+  /** 운행 하나 (가속 → 감속) 분석. a: 수직 가속도(중력·바이어스 제거) */
+  function shapeOne(a, fs) {
+    const n = a.length; if (n < fs * 3) return null;
+    const a2 = zp(a, 2, fs), a5 = zp(a, 5, fs), j = grad(zp(a, 1.3, fs), fs), j5 = grad(a5, fs), s = grad(grad(a2, fs), fs);
+    // 0.5초 창에서 거의 전부 |a| > 0.15 이면 '가감속 중'
+    const W = Math.round(0.5 * fs), half = W >> 1, big = new Uint8Array(n), cs = new Int32Array(n + 1);
+    for (let i = 0; i < n; i++) cs[i + 1] = cs[i] + (Math.abs(a2[i]) > 0.15 ? 1 : 0);
+    for (let i = 0; i < n; i++) { const L = Math.max(0, i - half), R = Math.min(n, i - half + W); big[i] = cs[R] - cs[L] >= W - 1 ? 1 : 0; }
+    let i0 = big.indexOf(1), i1 = big.lastIndexOf(1);
+    if (i0 < 0 || i1 - i0 < fs * 1.5) return null;
+    const mid = (i0 + i1) >> 1;
+    let on = i0; while (on > 0 && Math.abs(a5[on]) > 0.05) on--;
+    let off = i1; while (off < n - 1 && Math.abs(a5[off]) > 0.05) off++;
+    let v = 0; for (let i = 0; i <= mid; i++) v += a2[i];
+    const sg = v >= 0 ? 1 : -1;
+    const x = Float64Array.from(a2, q => q * sg), J = Float64Array.from(j, q => q * sg), S = Float64Array.from(s, q => q * sg);
+    const A0 = Math.max(0, on - Math.round(0.5 * fs)), D1 = Math.min(n, off + Math.round(0.5 * fs));
+    const pA = Float64Array.from(x.subarray(A0, mid), q => Math.max(0, q));
+    const pD = Float64Array.from(x.subarray(mid, D1), q => Math.max(0, -q));
+    const max = arr => { let m = 0; for (const q of arr) if (q > m) m = q; return m; };
+    const acc = max(pA), dec = max(pD);
+    if (acc < 0.15 || dec < 0.15) return null;
+    const first = (p, th) => { for (let i = 0; i < p.length; i++) if (p[i] >= th) return i; return -1; };
+    const last = (p, th) => { for (let i = p.length - 1; i >= 0; i--) if (p[i] >= th) return i; return -1; };
+    const tm = p => { const pk = max(p), lo = first(p, .1 * pk), hi = first(p, .9 * pk), hiL = last(p, .9 * pk), loL = last(p, .1 * pk);
+      return { rise: (hi - lo) / fs, plat: (hiL - hi) / fs, rel: (loL - hiL) / fs }; };
+    const trend = p => { const pk = max(p), a = first(p, .5 * pk), b = last(p, .5 * pk), k = b - a + 1;
+      return (p[a + Math.floor(.75 * k)] - p[a + Math.floor(.25 * k)]) / pk; };
+    // 힘을 거는 시간(10→90%) 대비 푸는 시간(마지막 85% → 5%)
+    const engRel = p => { const pk = max(p), a10 = first(p, .1 * pk), a90 = first(p, .9 * pk), e85 = last(p, .85 * pk);
+      let k = e85; while (k < p.length - 1 && p[k] > .05 * pk) k++;
+      return (k - e85) / Math.max(1, a90 - a10); };
+    const tA = tm(pA), tD = tm(pD);
+    let jerk = 0, stop = -1e9, kick = 0;
+    for (let i = A0; i < D1; i++) jerk = Math.max(jerk, Math.abs(J[i]));
+    for (let i = mid; i < D1; i++) stop = Math.max(stop, J[i]);
+    for (let i = Math.max(0, on - Math.round(.3 * fs)); i < Math.min(n, on + Math.round(.4 * fs)); i++) kick = Math.max(kick, Math.abs(j5[i] * sg));
+    const hump = (lo, hi) => peaks(J, lo, hi, .15, HUMP_PR, 1) + peaks(J, lo, hi, .15, HUMP_PR, -1);
+    const extra = hump(A0, mid) + hump(mid, D1) - 4;
+    let hs = 0, hn = 0, hm = 0;
+    for (let i = 0; i < pA.length; i++) if (pA[i] >= .3 * acc) { const q = a5[A0 + i] - a2[A0 + i]; hs += q * q; hm += q; hn++; }
+    const hf = hn ? Math.sqrt(Math.max(0, hs / hn - (hm / hn) ** 2)) : 0;
+    const lobA = peaks(pA, 0, pA.length, .2, .12), lobD = peaks(pD, 0, pD.length, .2, .12);
+    const sAbs = (lo, hi) => { let m = 0; for (let i = Math.max(0, lo); i < Math.min(n, hi); i++) m = Math.max(m, Math.abs(S[i])); return m; };
+    const F = Math.round(fs);
+    const snap = [sAbs(i0 - F, i0 + F), sAbs(i0 + F / 2, mid), sAbs(mid, i1 - F / 2), sAbs(i1 - F, i1 + 1.5 * F)];
+    const startCut = pA[0] > .1 * acc, endCut = pD[pD.length - 1] > .1 * dec;
+    return { dir: sg, acc, dec, jerk, stop, kick, tA, tD, trA: trend(pA), trD: trend(pD), extra, hf, lobA, lobD, snap,
+      relA: startCut ? null : engRel(pA), relD: endCut ? null : engRel(pD) };
+  }
+
+  /** 운행 하나 판정 → 내부 점수, 문제 태그, 성격 태그 */
+  const HUMP_PR = 0.12;   // 저크 봉우리 돌출도 (월계삼창 "살짝 울렁" 기준)
+  function judgeOne(r) {
+    const a = Math.max(r.acc, r.dec), j = r.jerk, bad = [], ch = [];
+    let p = a <= .7 ? 0 : a <= 1.3 ? 15 * (a - .7) / .6 : 15 + 25 * ramp(a, 1.3, 1.8);
+    p += j <= .8 ? 0 : j <= 1.6 ? 25 * (j - .8) / .8 : 25 + 15 * ramp(j, 1.6, 2.4);
+    if (r.stop >= 1.3) { bad.push("thud"); p += 8; }
+    if (r.lobA >= 2 || r.kick >= 3) { bad.push("bounce"); p += 8; }
+    if (r.extra >= 4 || r.hf >= .035) { bad.push("wave"); p += 8; }
+    else if (r.extra >= 2 && !bad.includes("thud")) { bad.push("wobble"); p += 3; }
+    if (r.lobD >= 2 && !bad.includes("thud")) { bad.push("twice"); p += 5; }
+    for (const v of r.snap) p += 3 * ramp(v, 5, 10) + 5 * ramp(v, 10, 20);      // 가가가속도: 모서리가 각질수록
+    const slowA = r.relA == null ? 0 : 25 * ramp(r.relA, 1.5, 2.1);               // 꽉 잡았다가 스르르 (가속)
+    const slowD = r.relD == null ? 0 : 25 * ramp(r.relD, 1.5, 2.1);               // 스르르 멈춤 (감속)
+    p += slowA + slowD;
+    if (slowD >= 8) bad.push("slowStop");
+    if (slowA >= 8) ch.push("grabRelease");
+    if (r.tA.rise / Math.max(r.tA.rel, .05) >= 1.4 && r.trA >= .1) ch.push("easeSnap");
+    if (r.tD.rel >= 1.8 && !bad.includes("slowStop")) ch.push("fadeBrake");
+    if (a >= .8 && !bad.includes("bounce") && !bad.includes("wave")) ch.push(r.tA.plat >= 2 ? "pull" : "firm");
+    if (a >= .55 && a < .8 && j <= .8 && !bad.length && r.tA.plat >= 1.2 && !ch.length) ch.push("softFirm");
+    return { score: Math.max(0, Math.round(100 - p)), bad, ch };
+  }
+
+  function rideShape(vert, trips, fs) {
+    if (!trips.length) return null;
+    const med = percentile(Array.from(vert), .5);
+    let worst = null;
+    for (const [a, b] of trips) {
+      const lo = Math.max(0, a - Math.round(1.5 * fs)), hi = Math.min(vert.length, b + Math.round(1.5 * fs));
+      const seg = Float64Array.from(vert.subarray ? vert.subarray(lo, hi) : vert.slice(lo, hi), q => q - med);
+      const r = shapeOne(seg, fs); if (!r) continue;
+      const jd = judgeOne(r); jd.dir = r.dir;
+      if (!worst || jd.score < worst.score) worst = jd;
+    }
+    return worst;
+  }
+
   /* ───────── 평가 · 한줄평 ───────── */
+  /* 평가 기준 (2026-11-23 사용자 지정)
+     가감속도: ~0.7 부드러움, ~1.3 강함, 그 이상 불편
+     저크: ~0.8 m/s³ 부드러움, 그 이상 불편
+     흔들림(A95): ~8 아주 훌륭, ~10 좋음, ~20 일반적, ~30 좋지 않음, 그 이상 불쾌
+     가감속 모양(가감속도+저크+가가가속도): 내부 점수 → 등급(훌륭/좋아요/무난/아쉬워요/점검) + 한마디 평
+     속력: ~70 저속, ~130 중속, ~250 고속, ~500 초고속, 그 이상 '초고속의 초월' */
+  const EVAL_VER = 5;
+  function accGrade(a) {
+    if (a <= 0.4) return { lv: 0, t: "거의 느껴지지 않을 만큼 순해요", s: "순해요" };
+    if (a <= 0.7) return { lv: 1, t: "부드러워요", s: "부드러워요" };
+    if (a <= 1.3) return { lv: 3, t: "강하게 느껴져요", s: "강해요" };
+    return { lv: 4, t: "불편하게 느껴질 수 있어요", s: "불편해요" };
+  }
+  function jerkGrade(j) {
+    if (j <= 0.5) return { lv: 0, t: "출발과 정지가 아주 매끄러워요", s: "아주 좋아요" };
+    if (j <= 0.8) return { lv: 1, t: "출발과 정지가 매끄러워요", s: "좋아요" };
+    if (j <= 1.2) return { lv: 3, t: "출발·정지 때 덜컥임이 느껴져요", s: "덜컥여요" };
+    return { lv: 4, t: "출발·정지가 우당탕탕 거칠어요", s: "우당탕탕" };
+  }
   function vibGrade(a95) {
-    if (a95 <= 6) return { lv: 0, t: "아주 훌륭해요" };
-    if (a95 <= 10) return { lv: 1, t: "좋은 편이에요" };
-    if (a95 <= 20) return { lv: 2, t: "일반적인 수준이에요" };
-    if (a95 <= 30) return { lv: 3, t: "좋지 않아요" };
-    return { lv: 4, t: "불쾌하게 느껴질 수 있어요" };
+    if (a95 <= 8) return { lv: 0, t: "아주 훌륭해요", s: "훌륭해요" };
+    if (a95 <= 10) return { lv: 1, t: "좋은 편이에요", s: "좋아요" };
+    if (a95 <= 20) return { lv: 2, t: "일반적인 수준이에요", s: "무난해요" };
+    if (a95 <= 30) return { lv: 3, t: "좋지 않아요", s: "아쉬워요" };
+    return { lv: 4, t: "놀이기구인가요?", s: "놀이기구?" };
   }
   function vibCharacter(st, vertical) {
     if (!st || !st.n) return "";
     const f = st.freq, parts = [];
-    const swaying = vertical && f >= 0.8 && f <= 4 && st.a95 >= 6 && st.max < 2 * st.a95;
-    if (swaying) parts.push(`위아래로 천천히 출렁여요(약 ${f.toFixed(1)} Hz)`);
-    else if (st.a95 > 6) {
+    const swaying = vertical && f >= 0.8 && f <= 4 && st.a95 >= 8 && st.max < 2 * st.a95;
+    if (st.a95 > 30) parts.push(vertical ? "위아래로 신나게 흔들려요. 컵에 담긴 물은 장담 못 해요" : "좌우로 크게 흔들려요. 손잡이를 꼭 잡으세요");
+    else if (swaying) parts.push(`출렁출렁, 위아래로 천천히 출렁여요(약 ${f.toFixed(1)} Hz)`);
+    else if (st.a95 > 8) {
       const feel = f < 2.5 ? "느리게 흔들려요" : f > 8 ? "잘게 떨려요" : "흔들림이 느껴져요";
       parts.push(`${vertical ? "위아래로" : "좌우로"} ${feel}(약 ${f.toFixed(1)} Hz)`);
     } else parts.push(vertical ? "위아래 떨림이 거의 없어요" : "좌우 떨림이 거의 없어요");
     if (st.spikes > 0) parts.push(`툭 튀는 순간이 ${st.spikes}번 있었어요(최대 ${st.max.toFixed(1)} gal)`);
     return parts.join(". ") + ".";
   }
-  function speedClass(v) {
-    if (v < 3) return "운행이 감지되지 않았어요";
-    if (v <= 60) return "저속 승강기예요";
-    if (v <= 105) return "중속 승강기예요";
-    if (v <= 300) return "고속 승강기예요";
-    return "초고속 승강기예요";
+  function speedGrade(v) {
+    if (v < 3) return { t: "운행이 감지되지 않았어요", s: "정지" };
+    if (v <= 70) return { t: "저속 승강기예요", s: "저속" };
+    if (v <= 130) return { t: "중속 승강기예요", s: "중속" };
+    if (v <= 250) return { t: "고속 승강기예요", s: "고속" };
+    if (v <= 500) return { t: "초고속 승강기예요", s: "초고속" };
+    return { t: "초고속의 초월. 기술진들의 고뇌의 정도를 감잡을 수 없어요", s: "초고속의 초월" };
+  }
+  /* 가감속 모양 → 등급 · 한마디 평 (점수는 화면에 내보내지 않는다) */
+  function rideGrade(sc) {
+    return sc >= 95 ? "훌륭해요" : sc >= 85 ? "좋아요" : sc >= 70 ? "무난해요" : sc >= 55 ? "아쉬워요" : "점검이 필요해요";
+  }
+  const RIDE_TXT = {
+    thud: ["멈추기 직전에 덜컹해요", "마지막에 쿵 하고 내려앉아요"],
+    bounce: ["출발이 쿵 하고 튀어요", "출발하자마자 한 번 튀어 올라요"],
+    wave: ["출렁출렁, 가감속이 물결쳐요", "출렁이며 달려요"],
+    wobble: ["가감속 중에 살짝 울렁여요", "살짝 울렁이는 구간이 있어요"],
+    twice: ["감속을 2번 하네요", "브레이크를 두 번에 나눠 밟아요"],
+    slowStop: ["감속을 스르르 풀며 뜸 들이다 멈춰요", "멈출 듯 말 듯 스르르 멈춰요"],
+    grabRelease: ["꽉 잡았다가 스르르 놓아줘요", "힘껏 출발했다가 스르르 풀어요"],
+    easeSnap: ["슬며시 잡았다가 팍 놓아요"],
+    fadeBrake: ["브레이크를 점점 풀며 멈춰요"],
+    pull: ["쭉 빨려 올라가요"], pullDown: ["쭉 빨려 내려가요"],
+    firm: ["강하고 단단하게 치고 나가요"],
+    softFirm: ["부드러우면서도 단단해요"],
+    great: ["군더더기 없는 가감속이에요", "물 위를 미끄러지듯 움직여요"],
+  };
+  const GRADE_TXT = { "훌륭해요": "승차감이 훌륭해요.", "좋아요": "승차감이 좋아요.", "무난해요": "승차감은 무난해요.", "아쉬워요": "승차감이 조금 아쉬워요.", "점검이 필요해요": "점검이 필요해 보여요." };
+  function rideLine(R, m, vV, vL) {
+    const seed = Math.floor((m.jerkMax + m.accPeak + m.distance) * 997);
+    const pick = (k, i) => { const arr = RIDE_TXT[k === "pull" && R.dir < 0 ? "pullDown" : k]; return arr[(seed + i) % arr.length]; };
+    const ORDER = ["bounce", "pull", "firm", "softFirm", "grabRelease", "easeSnap", "wave", "wobble", "twice", "fadeBrake", "slowStop", "thud"];
+    const keys = [...R.bad.slice(0, 2), ...R.ch.slice(0, Math.max(0, 2 - R.bad.length))].sort((x, y) => ORDER.indexOf(x) - ORDER.indexOf(y));
+    if (!keys.length && R.score >= 95) keys.push("great");
+    const parts = keys.map((k, i) => pick(k, i));
+    const grade = rideGrade(R.score);
+    let line = (R.bad.length >= 3 || R.score < 55 ? "우당탕탕! " : "") + (parts.length ? parts.join(". ") + ". " : "") + GRADE_TXT[grade];
+    const vib = [];
+    if (vV.lv >= 2) vib.push("위아래"); if (vL && vL.lv >= 2) vib.push("좌우");
+    if (vib.length) line += ` ${vib.join("·")} 흔들림도 조금 느껴져요.`;
+    return line;
   }
   function evaluate(m) {
-    const a = m.accPeak;
-    const acc = a <= 0.3 ? { lv: 0, t: "거의 느껴지지 않아요" }
-      : a <= 0.6 ? { lv: 1, t: "부드러워요" }
-      : a <= 1.0 ? { lv: 3, t: "강하게 느껴져요" }
-      : { lv: 4, t: "불편하게 느껴질 수 있어요" };
-    const jerk = m.jerkMax <= 0.8 ? { lv: 0, t: "출발과 정지가 매끄러워요" } : { lv: 3, t: "출발·정지 때 덜컥임이 느껴질 수 있어요" };
+    const acc = accGrade(m.accPeak);
+    const jerk = jerkGrade(m.jerkMax);
     const vV = vibGrade(m.vibV.a95);
     const vL = m.vibL ? vibGrade(m.vibL.a95) : null;
     const dirs = m.speedUp > 3 && m.speedDown > 3 ? "상승·하강" : m.speedUp > 3 ? "상승" : m.speedDown > 3 ? "하강" : "";
-    const speed = { lv: 0, t: speedClass(m.speedMax) + (dirs ? ` · ${dirs}` : "") };
+    const sg = speedGrade(m.speedMax);
+    const speed = { lv: 0, t: sg.t + (dirs && m.speedMax >= 3 && m.speedMax <= 500 ? ` · ${dirs}` : ""), s: sg.s };
+    const accS = a => (a <= 0.4 ? "순하고" : a <= 0.7 ? "부드럽고" : a <= 1.3 ? "강하고" : "거칠고");
+    const gA = accGrade(m.accMax).s, gD = accGrade(m.decMax).s;
+    acc.detail = `가속은 ${accS(m.accMax)} 감속${gA === gD ? "도" : "은"} ${gD}`;
 
     const issues = [];
     if (acc.lv >= 3) issues.push({ lv: acc.lv, name: "가감속" });
@@ -361,8 +537,11 @@
     if (vV.lv >= 2) issues.push({ lv: vV.lv + (vV.lv >= 3 ? 1 : 0), name: "상하 흔들림" });
     if (vL && vL.lv >= 2) issues.push({ lv: vL.lv + (vL.lv >= 3 ? 1 : 0), name: "좌우 흔들림" });
     let overall;
+    const R = m.ride;
     if (m.speedMax < 3) overall = "엘리베이터가 움직인 구간을 찾지 못했어요.";
-    else if (!issues.length) overall = "전반적으로 부드럽고 안정적인 승차감이에요.";
+    else if (vV.lv >= 4 || (vL && vL.lv >= 4)) overall = `놀이기구인가요? ${vV.lv >= 4 ? "위아래" : "좌우"} 흔들림이 ${(vV.lv >= 4 ? m.vibV.a95 : m.vibL.a95).toFixed(0)} gal이나 돼요. 점검을 권해요.`;
+    else if (R) overall = rideLine(R, m, vV, vL);
+    else if (!issues.length) overall = "아주 안정적인 승차감이에요.";
     else {
       issues.sort((x, y) => y.lv - x.lv);
       const names = issues.map(i => i.name);
@@ -375,11 +554,47 @@
           : `대체로 무난하지만 ${first}${josa(first)} 조금 아쉬워요.`;
     }
     return {
-      overall, acc, jerk, speed,
+      ver: EVAL_VER, overall, acc, jerk, speed, ride: R ? { grade: rideGrade(R.score), tags: [...R.bad, ...R.ch] } : null,
       vibV: { ...vV, line: vibCharacter(m.vibV, true) },
       vibL: vL ? { ...vL, line: vibCharacter(m.vibL, false) } : null,
     };
   }
+
+  /* ───────── 기압계 보정 (속력·주행 거리에만 적용) ─────────
+     기압 → 고도(국제표준대기), 0.5 Hz로 부드럽게 한 뒤 미분해 '기압 속력'을 구한다.
+     가속도 적분 속력의 빠른 변화(고역)와 기압 속력의 느린 흐름(저역)을 합치는 상보 필터.
+     baro: [{t: 측정 시작 후 초, p: hPa}] */
+  function fuseBaro(speed, fs, baro) {
+    const n = speed.length;
+    if (!baro || baro.length < 5 || n < fs) return null;
+    const alt = baro.map(b => ({ t: b.t, h: 44330 * (1 - Math.pow(b.p / baro[0].p, 1 / 5.255)) }));
+    // 60 Hz로 보간
+    const h = new Float64Array(n); let j = 0;
+    for (let i = 0; i < n; i++) {
+      const t = i / fs;
+      while (j < alt.length - 2 && alt[j + 1].t < t) j++;
+      const a = alt[j], b = alt[Math.min(j + 1, alt.length - 1)];
+      h[i] = b.t > a.t ? a.h + (b.h - a.h) * clamp01((t - a.t) / (b.t - a.t)) : a.h;
+    }
+    // 오차 추정 방식: 가속도 속력과 기압 속력을 '똑같은' 저역통과에 통과시켜 시간 지연을 맞춘 뒤
+    // 둘의 차이(= 가속도 적분의 누적 오차)만 천천히 추정해서 빼 준다. 움직임 자체는 가속도 쪽을 그대로 쓴다.
+    const fA1 = Biquad.make(0.4, fs, false), fA2 = Biquad.make(0.4, fs, false);
+    const fB1 = Biquad.make(0.4, fs, false), fB2 = Biquad.make(0.4, fs, false);
+    const TAU = 3, k = 1 / (TAU * fs);
+    const out = new Float32Array(n), dist = new Float32Array(n);
+    let prevH = null, err = 0, d = 0;
+    for (let i = 0; i < n; i++) {
+      const hs = fB2.process(fB1.process(h[i]));
+      const vb = prevH === null ? 0 : (hs - prevH) * fs * 60; prevH = hs;          // m/min, 지연 포함
+      const va = fA2.process(fA1.process(speed[i]));                                // 같은 지연
+      if (i > fs) err += k * ((va - vb) - err);
+      if (speed[i] === 0) err *= 0.98;                                             // 정지하면 오차 추정을 서서히 비움
+      out[i] = speed[i] === 0 ? 0 : speed[i] - err;
+      d += Math.abs(out[i]) / 60 / fs; dist[i] = d;
+    }
+    return { speed: out, dist };
+  }
+  const clamp01 = v => (v < 0 ? 0 : v > 1 ? 1 : v);
 
   /* ───────── CSV ───────── */
   function parseCsv(text) {
@@ -537,7 +752,7 @@
 
   const Core = {
     FS, P, Biquad, Resampler, StabilityDetector, Calibration, AbnormalDetector, PeakToPeak, RideAnalyzer,
-    analyze, evaluate, ppStats, percentile, parseCsv, importCsv, exportCsv, DemoSignal,
+    analyze, evaluate, rideShape, _dbg: { zp, grad, peaks }, fuseBaro, EVAL_VER, ppStats, percentile, parseCsv, importCsv, exportCsv, DemoSignal,
   };
   if (typeof module !== "undefined" && module.exports) module.exports = Core;
   else root.Core = Core;

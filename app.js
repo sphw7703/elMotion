@@ -23,6 +23,7 @@ const ICON = {
   chev: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>',
   spark: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l1.8 5.6L19.5 9l-5.7 1.6L12 16l-1.8-5.4L4.5 9l5.7-1.4z"/><path d="M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8z" opacity=".6"/></svg>',
   stop: '<svg viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2.5"/></svg>',
+  star: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2.5c.6 4.6 2.9 6.9 7.5 7.5v.1c-4.6.6-6.9 2.9-7.5 7.5h-.1c-.6-4.6-2.9-6.9-7.5-7.5V10c4.6-.6 6.9-2.9 7.5-7.5z"/></svg>',
   play: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5.5v13a1 1 0 001.5.9l10.4-6.5a1 1 0 000-1.8L9.5 4.6A1 1 0 008 5.5z"/></svg>',
 };
 
@@ -220,6 +221,24 @@ class Chart {
     g.restore();
     // 끝점 강조 (실시간)
     if (o.window && n) { const px = x(n - 1), py = y(v[n - 1]); g.fillStyle = o.color; g.beginPath(); g.arc(px, py, 3.5, 0, 7); g.fill(); }
+    // 최고·최저 표시 (기록 그래프): 점 + 세로 지시선 + 값
+    if (o.marks && n > 1 && this.prog >= 1) {
+      let hi = 0, lo = 0;
+      for (let i = 1; i < n; i++) { if (v[i] > v[hi]) hi = i; if (v[i] < v[lo]) lo = i; }
+      g.font = `800 11px ${cssVar("--font-num")}`; g.textAlign = "center";
+      const mark = (i, above) => {
+        const val = v[i]; if (Number.isNaN(val) || Math.abs(val) < Math.pow(10, -o.dec)) return;
+        const px = x(i), py = y(val), label = `${Math.abs(val).toFixed(o.dec)} ${o.unit}`;
+        const tw = g.measureText(label).width;
+        const ty = above ? Math.max(T + 12, py - 14) : Math.min(B - 2, py + 14);
+        g.strokeStyle = cssVar("--ink-2"); g.globalAlpha = .6; g.lineWidth = 1;
+        g.beginPath(); g.moveTo(px, py); g.lineTo(px, above ? ty - 2 : ty - 10); g.stroke(); g.globalAlpha = 1;
+        g.fillStyle = o.color; g.beginPath(); g.arc(px, py, 3.5, 0, 7); g.fill();
+        g.fillStyle = cssVar("--ink"); g.textBaseline = above ? "bottom" : "top";
+        g.fillText(label, clamp(px, L + tw / 2 + 2, R - tw / 2 - 2), above ? ty - 3 : ty - 9);
+      };
+      mark(hi, true); mark(lo, false);
+    }
     // 탭한 지점
     if (this.cursor >= 0 && this.cursor < n && this.prog >= 1) {
       const i = this.cursor, px = x(i), val = v[i];
@@ -255,16 +274,46 @@ const SERIES = [
 
 /* ───────── 기록 저장소 (IndexedDB) ───────── */
 const cache = new Map();
+/* 기압계: 웹 브라우저에는 아직 기압 센서 API가 없어(크롬 포함) 대부분 '사용 불가'로 자동 비활성화된다.
+   앞으로 PressureSensor가 생기거나 안드로이드 앱으로 옮기면 같은 코드로 바로 동작한다. */
+const baro = {
+  get supported() { return typeof window.PressureSensor === "function"; },
+  get on() { return this.supported && prefs.get("baro", "on") === "on"; },
+  start(t0) {
+    this.samples = []; this.t0 = t0;
+    if (!this.on) return;
+    try {
+      this.sensor = new window.PressureSensor({ frequency: 25 });
+      this.sensor.onreading = () => this.samples.push({ t: (performance.now() - this.t0) / 1000, p: this.sensor.pressure });
+      this.sensor.start();
+    } catch (e) { this.sensor = null; }
+  },
+  stop() { try { this.sensor && this.sensor.stop(); } catch (e) { /* 무시 */ } this.sensor = null; return this.samples && this.samples.length > 4 ? this.samples : null; },
+};
 function analysisOf(rec) {
-  const k = rec.id + ":" + rec.vert.length;
-  if (!cache.has(k)) cache.set(k, Core.analyze(rec.vert, rec.lat, rec.rate));
+  const useBaro = !!(rec.baro && rec.baro.length > 4 && prefs.get("baro", "on") === "on");
+  const k = rec.id + ":" + rec.vert.length + ":" + (useBaro ? 1 : 0);
+  if (!cache.has(k)) {
+    const A = Core.analyze(rec.vert, rec.lat, rec.rate);
+    if (useBaro) {
+      // 기압계 보정은 속력과 주행 거리에만
+      const f = Core.fuseBaro(A.series.speed, rec.rate, rec.baro);
+      if (f) {
+        A.series.speed = f.speed; A.series.dist = f.dist;
+        let up = 0, down = 0; for (const v of f.speed) { if (v > up) up = v; if (-v > down) down = -v; }
+        Object.assign(A.m, { speedUp: up, speedDown: down, speedMax: Math.max(up, down), distance: f.dist[f.dist.length - 1], baro: true });
+        A.m.eval = Core.evaluate(A.m);
+      }
+    }
+    cache.set(k, A);
+  }
   return cache.get(k);
 }
 function metaOf(rec) {
   const m = analysisOf(rec).m;
   return {
     id: rec.id, name: rec.name || "", startedAt: rec.startedAt, duration: m.duration, demo: !!rec.demo, imported: !!rec.imported, hasLat: !!rec.lat,
-    accPeak: m.accPeak, latA95: m.vibL ? m.vibL.a95 : null, speedMax: m.speedMax, overall: m.eval.overall, updatedAt: rec.updatedAt || Date.now(),
+    accPeak: m.accPeak, latA95: m.vibL ? m.vibL.a95 : null, speedMax: m.speedMax, overall: m.eval.overall, updatedAt: rec.updatedAt || Date.now(), evalVer: Core.EVAL_VER,
   };
 }
 const store = {
@@ -293,8 +342,15 @@ const store = {
     await this.req("meta", "readwrite", s => s.put(meta));
   },
   async list() {
-    const a = this.db ? await this.req("meta", "readonly", s => s.getAll()) : [...this.mem.values()].map(v => v.meta);
-    return (a || []).sort((x, y) => y.startedAt - x.startedAt);
+    let a = this.db ? await this.req("meta", "readonly", s => s.getAll()) : [...this.mem.values()].map(v => v.meta);
+    a = a || [];
+    // 평가 기준이 바뀌었으면 저장된 요약을 새 기준으로 다시 만든다
+    for (let i = 0; i < a.length; i++) {
+      if (a[i].evalVer === Core.EVAL_VER) continue;
+      const rec = await this.get(a[i].id);
+      if (rec) { await this.put(rec); a[i] = metaOf(rec); }
+    }
+    return a.sort((x, y) => y.startedAt - x.startedAt);
   },
   async get(id) {
     if (!this.db) { const m = this.mem.get(id); return m ? m.rec : null; }
@@ -385,6 +441,7 @@ const ctl = {
     this.vert = []; this.lat = [];
     this.live = { acc: [], jerk: [], vibV: [], vibL: [], speed: [] };
     this.o = null; this.startedAt = Date.now();
+    baro.start(performance.now());
     this.lockScreen();
     home.render();
   },
@@ -403,13 +460,15 @@ const ctl = {
     if (this.state !== "measure") { this.state = "idle"; this.progress = 0; home.render(); return; }
     this.state = "idle"; this.needDisturb = true; this.progress = 0;
     this.unlockScreen();
+    const baroSamples = baro.stop();
     const demo = !!this.demo; this.stopDemo();
     const n = reason === "abnormal" ? Math.max(0, this.vert.length - CUT) : this.vert.length;
     home.render();
     if (n < FS) { toast("측정 시간이 너무 짧아 저장하지 않았어요."); return; }
     if (reason === "abnormal") { toast("비정상적인 흔들림이 감지되어 측정을 종료했어요.", 4200); try { navigator.vibrate && navigator.vibrate(60); } catch (e) { /* 무시 */ } }
     const rec = { id: "ride_" + this.startedAt, name: demo ? "데모 측정" : "", startedAt: this.startedAt, rate: FS, demo,
-      vert: Float32Array.from(this.vert.slice(0, n)), lat: Float32Array.from(this.lat.slice(0, n)), updatedAt: Date.now() };
+      vert: Float32Array.from(this.vert.slice(0, n)), lat: Float32Array.from(this.lat.slice(0, n)), updatedAt: Date.now(),
+      baro: baroSamples ? baroSamples.filter(b => b.t <= n / FS) : null };
     try { await store.put(rec); } catch (e) { toast("기록을 저장하지 못했어요."); }
     records.render();
     detail.open(rec, "home");
@@ -512,7 +571,7 @@ const home = {
    기록 관리
    ════════════════════════════════════════════════════════════════ */
 const records = {
-  selecting: false, sel: new Set(), items: [],
+  selecting: null, sel: new Set(), items: [], anchor: null,   // selecting: null | "export" | "delete"
   async render() {
     const list = $("#recList");
     try { this.items = await store.list(); } catch (e) { this.items = []; }
@@ -520,16 +579,15 @@ const records = {
       list.innerHTML = `<div class="empty">아직 측정 기록이 없어요.<br>홈에서 휴대폰을 내려놓으면 측정이 시작돼요.</div>`;
       return;
     }
-    list.classList.toggle("selecting", this.selecting);
-    list.innerHTML = this.items.map(m => {
-      const lv = (v, k) => (v > 0 ? clamp(v / LEGEND[k], 0.06, 1) : 0) * 100;
+    list.classList.toggle("selecting", !!this.selecting);
+    list.innerHTML = this.items.map((m, k) => {
+      const lv = (v, key) => (v > 0 ? clamp(v / LEGEND[key], 0.06, 1) : 0) * 100;
       const lat = m.latA95 == null ? "—" : m.latA95.toFixed(0);
-      return `<article class="rec-card glass ${this.sel.has(m.id) ? "sel" : ""}" data-id="${esc(m.id)}" tabindex="0">
+      return `<article class="rec-card glass ${this.sel.has(m.id) ? "sel" : ""} ${this.anchor === k ? "anchor" : ""}" data-id="${esc(m.id)}" data-k="${k}" tabindex="0">
         <div class="rc-head"><span class="check"></span>
           <div class="t"><div class="rc-name">${esc(m.name || fmtDate(m.startedAt))}${m.demo ? '<span class="tag">데모</span>' : ""}${m.imported ? '<span class="tag">가져옴</span>' : ""}</div>
           <div class="rc-date">${m.name ? fmtDate(m.startedAt) + " · " : ""}${fmtDur(m.duration)}</div></div>
-          <button class="ic-btn pop" data-act="edit" aria-label="이름 변경">${ICON.edit}</button>
-          <button class="ic-btn pop" data-act="del" aria-label="삭제">${ICON.del}</button></div>
+          <button class="ic-btn pop" data-act="edit" aria-label="이름 변경">${ICON.edit}</button></div>
         <div class="rc-body"><div class="minis">
           <div class="mini k-acc" style="--lv:${lv(m.accPeak, "acc")}%"><b>${m.accPeak.toFixed(2)}</b></div>
           <div class="mini k-lat" style="--lv:${m.latA95 == null ? 0 : lv(m.latA95, "lat")}%"><b>${lat}</b></div>
@@ -538,44 +596,76 @@ const records = {
     }).join("");
     stagger(list, 12);
     list.querySelectorAll(".rec-card").forEach(card => {
-      const id = card.dataset.id;
+      const id = card.dataset.id, k = +card.dataset.k;
       card.onclick = async e => {
+        if (this.selecting) { this.pick(k); return; }
         const act = e.target.closest("[data-act]");
-        if (this.selecting) { this.toggleSel(id, card); return; }
         if (act && act.dataset.act === "edit") return this.renameDlg(id, (this.items.find(x => x.id === id) || {}).name);
-        if (act && act.dataset.act === "del") return this.deleteDlg(id);
         const rec = await store.get(id); if (rec) detail.open(rec, "records");
       };
       card.onkeydown = e => { if (e.key === "Enter") card.click(); };
     });
   },
-  toggleSel(id, card) { if (this.sel.has(id)) this.sel.delete(id); else this.sel.add(id); card.classList.toggle("sel"); this.renderBar(); },
+  /** 범위 선택: 시작 기록과 끝 기록을 차례로 누르면 그 사이가 모두 선택(이미 모두 선택돼 있으면 해제) */
+  pick(k) {
+    if (this.anchor === null) { this.anchor = k; this.paint(); this.renderBar(); return; }
+    const a = Math.min(this.anchor, k), b = Math.max(this.anchor, k);
+    const ids = this.items.slice(a, b + 1).map(m => m.id);
+    const allOn = ids.every(id => this.sel.has(id));
+    ids.forEach(id => (allOn ? this.sel.delete(id) : this.sel.add(id)));
+    this.anchor = null; this.paint(); this.renderBar();
+  },
+  paint() {
+    $("#recList").querySelectorAll(".rec-card").forEach(c => {
+      c.classList.toggle("sel", this.sel.has(c.dataset.id));
+      c.classList.toggle("anchor", this.anchor === +c.dataset.k);
+    });
+  },
   renderBar() {
     let bar = $("#selBar");
     if (!this.selecting) { if (bar) bar.remove(); return; }
     if (!bar) { bar = document.createElement("div"); bar.id = "selBar"; bar.className = "select-bar"; document.body.appendChild(bar); }
-    const all = this.sel.size === this.items.length;
-    bar.innerHTML = `<button class="pill-btn" id="sbCancel">취소</button><button class="pill-btn" id="sbAll">${all ? "선택 해제" : "모두 선택"}</button><button class="pill-btn primary" id="sbGo" ${this.sel.size ? "" : "disabled"}>${this.sel.size}개 내보내기</button>`;
-    $("#sbCancel").onclick = () => this.endSelect();
-    $("#sbAll").onclick = () => { if (all) this.sel.clear(); else this.items.forEach(m => this.sel.add(m.id)); this.render(); this.renderBar(); };
-    $("#sbGo").onclick = () => this.exportSelected();
+    const all = this.items.length && this.sel.size === this.items.length;
+    const del = this.selecting === "delete";
+    const hint = this.anchor === null ? "시작할 기록과 끝 기록을 차례로 눌러 고르세요" : "끝 기록을 눌러 주세요";
+    bar.innerHTML = `<div class="sb-hint">${hint}</div><div class="sb-row">
+      <button class="pill-btn" id="sbCancel">취소</button>
+      <button class="pill-btn" id="sbAll">${all ? "선택 해제" : "모두 선택"}</button>
+      <button class="pill-btn ${del ? "danger" : "primary"}" id="sbGo" ${this.sel.size ? "" : "disabled"}>${this.sel.size}개 ${del ? "삭제" : "내보내기"}</button></div>`;
+    $("#sbCancel").onclick = () => nav.back();
+    $("#sbAll").onclick = () => { if (all) this.sel.clear(); else this.items.forEach(m => this.sel.add(m.id)); this.anchor = null; this.paint(); this.renderBar(); };
+    $("#sbGo").onclick = () => (del ? this.deleteSelected() : this.exportSelected());
   },
-  startSelect() {
-    if (!this.items.length) { toast("내보낼 기록이 없어요."); return; }
-    this.selecting = true; this.sel.clear(); this.render(); this.renderBar();
-    toast("내보낼 기록을 골라 주세요.", 2200);
+  startSelect(kind) {
+    if (!this.items.length) { toast(kind === "delete" ? "삭제할 기록이 없어요." : "내보낼 기록이 없어요."); return; }
+    this.setSelecting(kind);
+    nav.push("select");
   },
-  endSelect() { this.selecting = false; this.sel.clear(); this.render(); this.renderBar(); },
+  /** 화면만 바꾼다 (뒤로 가기 기록은 nav가 관리) */
+  setSelecting(kind) {
+    this.selecting = kind; this.sel.clear(); this.anchor = null;
+    $("#recList").classList.toggle("selecting", !!kind);
+    document.body.classList.toggle("rec-selecting", !!kind);
+    this.paint(); this.renderBar();
+  },
   async exportSelected() {
-    const ids = [...this.sel]; let ok = 0;
+    const ids = this.items.filter(m => this.sel.has(m.id)).map(m => m.id); let ok = 0;
     for (const id of ids) {
       const rec = await store.get(id); if (!rec) continue;
       const csv = Core.exportCsv(rec, analysisOf(rec));
       if (await saveFile(fileNameOf(rec), csv)) ok++;
       await sleep(350);
     }
-    this.endSelect();
+    nav.back();
     if (ok) toast(`${ok}개 파일을 내보냈어요.`);
+  },
+  async deleteSelected() {
+    const ids = [...this.sel];
+    if (!(await confirmDlg(`${ids.length}개 기록을 삭제할까요?`, "삭제한 기록은 되돌릴 수 없어요.", "삭제", "취소", true))) return;
+    for (const id of ids) await store.del(id);
+    nav.back();
+    await this.render();
+    toast(`${ids.length}개 기록을 삭제했어요.`);
   },
   renameDlg(id, current) {
     dialog(`<h3>기록 이름</h3><p>내보내는 파일 이름으로도 쓰여요.</p><input id="nmI" maxlength="40" placeholder="예: 본관 3호기 상행" value="${esc(current || "")}">
@@ -589,11 +679,6 @@ const records = {
       b.querySelector("#dC").onclick = close; b.querySelector("#dS").onclick = save;
       b.querySelector("#nmI").onkeydown = e => { if (e.key === "Enter") save(); };
     });
-  },
-  async deleteDlg(id) {
-    const m = this.items.find(x => x.id === id);
-    if (!(await confirmDlg("기록을 삭제할까요?", `${m && m.name ? m.name : m ? fmtDate(m.startedAt) : "이"} 기록은 되돌릴 수 없어요.`, "삭제", "취소", true))) return;
-    await store.del(id); toast("기록을 삭제했어요."); this.render();
   },
   async importFiles(files) {
     if (!files.length) return;
@@ -655,15 +740,17 @@ const detail = {
     h.querySelector(".tt div").textContent = `${fmtDate(r.startedAt)} · ${fmtDur(A.m.duration)}`;
   },
   render() {
-    const r = this.rec, A = analysisOf(r), m = A.m, ev = m.eval, box = $("#detailIn");
+    const r = this.rec, A = analysisOf(r), ev = A.m.eval, box = $("#detailIn");
     charts.clear(box);
     box.innerHTML = `<div class="top" id="dHead"><button class="round-btn pop" id="dBack" aria-label="뒤로">${ICON.back}</button>
         <div class="tt"><h2></h2><div></div></div><button class="round-btn pop" id="dEdit" aria-label="이름 변경">${ICON.edit}</button></div>
-      <div class="overall fade-in">${esc(ev.overall)}</div>
+      ${this.detail
+        ? `<div class="ai-box glass fade-in"><span class="ai-chip">${ICON.star}AI 평가</span><p>${esc(ev.overall)}</p></div>`
+        : `<div class="overall fade-in">${esc(ev.overall)}</div>`}
       <div id="dBody"></div>
       <div class="toggle-wrap"><button class="pill-btn ${this.detail ? "up" : ""}" id="dTog">${ICON.chev}${this.detail ? "접을래요" : "자세히 볼래요"}</button></div>`;
     this.renderHead();
-    $("#dBack").onclick = () => nav.closeSheet();
+    $("#dBack").onclick = () => nav.back();
     $("#dEdit").onclick = () => records.renameDlg(r.id, r.name);
     $("#dTog").onclick = () => { this.detail = !this.detail; this.render(); $("#detailIn").scrollTop = 0; };
     stagger(box);
@@ -673,37 +760,45 @@ const detail = {
     const m = A.m, ev = m.eval, body = $("#dBody");
     const rows = [
       { k: "acc", lbl: "가감속도", lv: m.accPeak / LEGEND.acc, n1: m.accMax.toFixed(2), n2: m.decMax.toFixed(2), u: "m/s²",
-        b: ev.acc, p: `가속 최대 ${m.accMax.toFixed(2)} · 감속 최대 ${m.decMax.toFixed(2)} m/s²`, h: "위 숫자는 가속, 아래 숫자는 감속이에요." },
+        b: ev.acc, p: `가속 최대 ${m.accMax.toFixed(2)} · 감속 최대 ${m.decMax.toFixed(2)} m/s²` },
       m.vibL
-        ? { k: "lat", lbl: "좌우 흔들림", lv: m.vibL.a95 / LEGEND.lat, n1: m.vibL.a95.toFixed(1), u: "gal", b: ev.vibL, p: ev.vibL.line, h: "ISO 18738 A95 peak-to-peak 기준" }
-        : { k: "lat", lbl: "좌우 흔들림", lv: 0, n1: "—", u: "gal", b: { lv: 2, t: "수평 데이터가 없어요" }, p: "가져온 파일에 E열(수평 방향) 값이 없어요.", h: "" },
+        ? { k: "lat", lbl: "좌우 흔들림", lv: m.vibL.a95 / LEGEND.lat, n1: m.vibL.a95.toFixed(1), u: "gal", b: ev.vibL, p: ev.vibL.line }
+        : { k: "lat", lbl: "좌우 흔들림", lv: 0, n1: "—", u: "gal", b: { lv: 2, t: "수평 데이터가 없어요" }, p: "가져온 파일에 수평 방향 값이 없어요." },
       { k: "spd", lbl: "속력", lv: m.speedMax / LEGEND.spd, n1: m.speedMax.toFixed(1), u: "m/min", b: ev.speed,
-        p: `상승 최고 ${m.speedUp.toFixed(1)} · 하강 최고 ${m.speedDown.toFixed(1)} m/min`, h: `주행 거리 ${m.distance.toFixed(1)} m` },
+        p: `상승 최고 ${m.speedUp.toFixed(1)} · 하강 최고 ${m.speedDown.toFixed(1)} m/min` },
     ];
     const size = Math.round(clamp(innerWidth * 0.36, 120, 160));
     body.innerHTML = `<div class="d-rows">${rows.map((r, i) => `<div class="d-row fade-in" style="animation-delay:${0.1 + i * 0.1}s">
         <div><div class="lbl">${r.lbl}</div><div id="ds-${r.k}"></div></div>
-        <div class="ev"><b class="lv${r.b.lv}">${esc(r.b.t)}</b><p>${esc(r.p)}</p>${r.h ? `<div class="hint">${esc(r.h)}</div>` : ""}</div></div>`).join("")}</div>`;
+        <div class="ev"><b class="lv${r.b.lv}">${esc(r.b.t)}</b><p>${esc(r.p)}</p></div></div>`).join("")}</div>`;
     rows.forEach((r, i) => {
       const s = new Sphere(r.k, size); $(`#ds-${r.k}`).appendChild(s.el);
       s.text(r.n1, r.n2 != null ? r.n2 : null, r.u).level(0);
       setTimeout(() => s.level(Math.max(r.lv, r.n1 === "—" ? 0 : 0.03)), 250 + i * 150);
     });
   },
+  /** 자세히: AI 평가 + 6가지 지표 + 그래프 (레이아웃 스케치 기준) */
   full(A) {
     const m = A.m, ev = m.eval, body = $("#dBody"), S = A.series, r = this.rec;
-    body.innerHTML = `<div class="stat-row fade-in">
-        <div class="stat glass"><div class="l">저크 최대</div><div class="v">${m.jerkMax.toFixed(2)}<small>m/s³</small></div><div class="e lv${ev.jerk.lv}">${ev.jerk.lv ? "덜컥임 주의" : "매끄러워요"}</div></div>
-        <div class="stat glass"><div class="l">상하 흔들림</div><div class="v">${m.vibV.a95.toFixed(1)}<small>gal</small></div><div class="e lv${ev.vibV.lv}">${esc(ev.vibV.t)}</div></div>
-        <div class="stat glass"><div class="l">주행 거리</div><div class="v">${m.distance.toFixed(1)}<small>m</small></div><div class="e">${m.trips}회 운행</div></div></div>
-      <div class="glass fade-in" style="padding:12px 14px;margin-top:8px;font-size:13px;color:var(--ink-2);line-height:1.6">
-        <div><b style="color:var(--ink)">저크</b> · ${esc(ev.jerk.t)}</div>
-        <div><b style="color:var(--ink)">상하 흔들림</b> · ${esc(ev.vibV.line)} <span style="color:var(--ink-3)">(A95 p-p, 정속 구간)</span></div>
-        ${ev.vibL ? `<div><b style="color:var(--ink)">좌우 흔들림</b> · A95 ${m.vibL.a95.toFixed(1)} gal, ${esc(ev.vibL.t)}</div>` : ""}
-        <div><b style="color:var(--ink)">가감속도</b> · 가속 ${m.accMax.toFixed(2)} / 감속 ${m.decMax.toFixed(2)} m/s², ${esc(ev.acc.t)}</div></div>
-      <div class="charts">${SERIES.filter(s => s.key !== "vibL" || r.lat).map((s, i) => `<div class="chart-card glass fade-in" style="animation-delay:${0.1 + i * 0.08}s">
-        <div class="h"><b>${s.title}</b><span>${s.unit}</span><em>그래프를 밀어서 값 보기</em></div><canvas class="chart" id="dc-${s.key}" style="height:170px"></canvas></div>`).join("")}</div>`;
-    SERIES.filter(s => s.key !== "vibL" || r.lat).forEach(s => new Chart($(`#dc-${s.key}`), { values: S[s.key], rate: r.rate, color: s.color, half: s.half, dec: s.dec, unit: s.unit, animate: true, tap: true }));
+    const floors = Math.round(m.distance / 3);
+    const cards = [
+      { l: "저크", v: m.jerkMax.toFixed(2), u: "m/s³", e: ev.jerk.s, lv: ev.jerk.lv },
+      { l: "가감속도", v2: [["가속", m.accMax.toFixed(2)], ["감속", m.decMax.toFixed(2)]], u: "m/s²", e: ev.acc.detail, e2: ev.acc.detail.split(/(?<=고) /), lv: ev.acc.lv },
+      { l: "속력", v: m.speedMax.toFixed(1), u: "m/min", e: m.speedMax <= 500 ? `${ev.speed.s} 승강기` : ev.speed.s, lv: 0 },
+      { l: "운행 거리", v: m.distance.toFixed(1), u: "m", e: floors >= 1 ? `건물 약 ${floors}층 높이` : "거의 움직이지 않았어요", lv: -1 },
+      { l: "상하 흔들림", v: m.vibV.a95.toFixed(1), u: "gal", e: ev.vibV.s, lv: ev.vibV.lv },
+      m.vibL ? { l: "좌우 흔들림", v: m.vibL.a95.toFixed(1), u: "gal", e: ev.vibL.s, lv: ev.vibL.lv } : { l: "좌우 흔들림", v: "—", u: "", e: "데이터 없음", lv: -1 },
+    ];
+    const series = SERIES.filter(s => s.key !== "vibL" || r.lat);
+    const comment = { acc: ev.acc.s, jerk: ev.jerk.s, vibV: ev.vibV.s, vibL: ev.vibL ? ev.vibL.s : "", speed: ev.speed.s };
+    body.innerHTML = `<div class="m6">${cards.map((c, i) => `<div class="m6-card glass fade-in" style="animation-delay:${0.05 + i * 0.05}s">
+        <div class="l">${c.l}</div>
+        ${c.v2 ? `<div class="v2">${c.v2.map(([k, v]) => `<div><span>${k}</span><b>${v}</b></div>`).join("")}</div><div class="u">${c.u}</div>`
+               : `<div class="v">${c.v}<small>${c.u}</small></div>`}
+        <div class="e ${c.e2 ? "two" : ""} ${c.lv >= 0 ? "lv" + c.lv : ""}">${c.e2 ? c.e2.map(x => `<span>${esc(x)}</span>`).join("") : esc(c.e)}</div></div>`).join("")}</div>
+      <div class="charts">${series.map((s, i) => `<div class="chart-card glass fade-in" style="animation-delay:${0.1 + i * 0.08}s">
+        <div class="h"><b>${s.title}</b><span>${s.unit}</span><em>${esc(comment[s.key] || "")}</em></div><canvas class="chart" id="dc-${s.key}" style="height:180px"></canvas></div>`).join("")}</div>`;
+    series.forEach(s => new Chart($(`#dc-${s.key}`), { values: S[s.key], rate: r.rate, color: s.color, half: s.half, dec: s.dec, unit: s.unit, animate: true, tap: true, marks: true }));
   },
 };
 
@@ -721,6 +816,17 @@ const settings = {
       <p>측정값은 휴대폰 센서로 구한 참고값이에요. 공식 승차감 검사를 대신하지 않아요.</p>
       <div class="acts"><button class="solid" id="dOk">확인</button></div>`, (b, close) => { b.querySelector("#dOk").onclick = close; });
     this.renderMode();
+    this.renderBaro();
+    $("#baroSw").onclick = () => {
+      if (!baro.supported) return;
+      prefs.set("baro", baro.on ? "off" : "on"); cache.clear(); this.renderBaro(); records.render();
+    };
+  },
+  renderBaro() {
+    const sw = $("#baroSw"), ok = baro.supported;
+    sw.disabled = !ok; sw.setAttribute("aria-checked", ok && baro.on ? "true" : "false");
+    $("#baroDesc").textContent = ok ? (baro.on ? "속력과 운행 거리를 기압 변화로 보정해요" : "가속도 센서만으로 계산해요")
+      : "이 기기(브라우저)에서는 기압계를 쓸 수 없어 꺼져 있어요";
   },
   renderMode() {
     const mode = ctl.mode, seg = $("#modeSeg"), btns = [...seg.querySelectorAll("button")];
@@ -798,7 +904,7 @@ const help = {
       <div class="help-slide">${s3}<h1>가져가세요.</h1><p>휴대폰을 가져가면 자동으로 측정이 끝나요.</p><p>혹은 측정 중에 <span class="inline-stop"><i></i>즉시 정지</span> 를 누르면 즉시 정지돼요.</p></div>
     </div>
     <div class="dots" id="hDots"><i></i><i></i><i></i></div>`;
-    $("#hClose").onclick = () => nav.closeSheet();
+    $("#hClose").onclick = () => nav.back();
     $("#hDots").querySelectorAll("i").forEach((d, i) => d.onclick = () => this.go(i));
     swipe($("#hTrack"), dir => this.go(clamp(this.i + dir, 0, 2)), dx => { $("#hTrack").style.transform = `translateX(calc(${-this.i * 33.3334}% + ${dx}px))`; }, () => this.go(this.i));
   },
@@ -841,70 +947,82 @@ function swipe(el, onCommit, onMove, onCancel, canStart = () => true) {
 }
 
 /* ════════════════════════════════════════════════════════════════
-   화면 이동: [기록 관리] ← [홈] → [설정], 뒤로 가기는 항상 홈
+   화면 이동: [기록 관리] ← [홈] → [설정]
+   뒤로 가기는 한 단계 위로: 기록 상세 → 기록 관리, 선택 모드 → 기록 관리, 기록 관리·설정·도움말 → 홈
+   브라우저 기록(#해시)과 같은 순서의 스택을 따로 들고 있어서 휴대폰의 뒤로 가기와 화면의 뒤로 버튼이 똑같이 움직인다.
    ════════════════════════════════════════════════════════════════ */
 const nav = {
-  page: 1, overlay: null, pushed: false,
+  page: 1, overlay: null, stack: [""],
   init() {
     const pager = $("#pager");
     swipe(pager, dir => this.go(clamp(this.page + dir, 0, 2)),
       dx => { const W = pager.parentElement.clientWidth; const edge = (this.page === 0 && dx > 0) || (this.page === 2 && dx < 0); pager.style.transform = `translateX(${-this.page * W + (edge ? dx * 0.3 : dx)}px)`; },
       () => this.go(this.page),
-      e => !this.overlay && !records.selecting && !e.target.closest("input, .seg"));
+      e => !this.overlay && !records.selecting && !e.target.closest("input, .seg, .switch"));
     $("#navRecords").onclick = () => this.go(0);
     $("#navHome").onclick = () => this.go(1);
     $("#navSettings").onclick = () => this.go(2);
     $("#btnHelp").onclick = () => help.open();
-    window.addEventListener("hashchange", () => this.fromHash());
-    window.addEventListener("resize", () => { this.place(); });
-    this.fromHash(true);
+    if (location.hash) history.replaceState(null, "", location.pathname + location.search);   // 항상 홈에서 시작
+    window.addEventListener("hashchange", () => this.onHash());
+    window.addEventListener("resize", () => this.place());
+    this.showPage(1);
+  },
+  get top() { return this.stack[this.stack.length - 1]; },
+  push(h) { this.stack.push(h); location.hash = h; },
+  replace(h) { this.stack[this.stack.length - 1] = h; if (h) location.replace("#" + h); else history.replaceState(null, "", location.pathname + location.search); this.apply(h); },
+  back() { if (this.stack.length > 1) history.back(); else this.apply(""); },
+  onHash() {
+    const h = location.hash.slice(1), st = this.stack;
+    if (st.length > 1 && st[st.length - 2] === h) st.pop();
+    else if (h !== this.top) st.push(h);
+    this.apply(h);
+  },
+  /** 해시 상태를 화면에 반영 (기록 스택은 건드리지 않는다) */
+  apply(h) {
+    if (h !== "select" && records.selecting) records.setSelecting(null);
+    if (h !== "record" && h !== "help" && this.overlay) this.hideSheet();
+    if (h === "" ) return this.showPage(1);
+    if (h === "records") return this.showPage(0);
+    if (h === "settings") return this.showPage(2);
+    if (h === "select") { if (!records.selecting) this.replace("records"); return; }
+    if (h === "record") { if (detail.rec) this.showSheet("record"); else this.replace(this.page === 0 ? "records" : ""); return; }
+    if (h === "help") { if (this.overlay !== "help") { help.build(); help.go(0); this.showSheet("help"); } }
+  },
+  /** 탭·스와이프로 쪽 이동: 홈 ↔ 한 단계(기록 관리/설정) */
+  go(i) {
+    const target = i === 0 ? "records" : i === 2 ? "settings" : "";
+    if (target === this.top) return this.showPage(i);
+    if (!target) return this.stack.length > 1 ? this.back() : this.replace("");
+    if (this.top === "") this.push(target); else this.replace(target);
+    this.showPage(i);
   },
   place() { $("#pager").style.transform = `translateX(${-this.page * 33.3334}%)`; },
-  go(i, fromHash) {
+  showPage(i) {
     const changed = i !== this.page;
     this.page = i; this.place();
     ["#navRecords", "#navHome", "#navSettings"].forEach((s, k) => $(s).classList.toggle("on", k === i));
     if (changed) {
-      const pageEl = ["#pRecords", "#pHome", "#pSettings"][i];
-      stagger($(pageEl));
+      stagger($(["#pRecords", "#pHome", "#pSettings"][i]));
       if (i === 0) records.render();
       if (i === 2) settings.renderMode();
+      if (i === 1) ctl.needDisturb = false;
     }
-    if (i === 1 && changed) ctl.needDisturb = false;
-    if (!fromHash) this.setHash(i === 0 ? "records" : i === 2 ? "settings" : "");
     ctl.dirty = true; home.updateSingle();
   },
-  setHash(h) {
-    const cur = location.hash.slice(1);
-    if (cur === h) return;
-    if (!h) { if (this.pushed) { this.pushed = false; history.back(); } else history.replaceState(null, "", location.pathname + location.search); return; }
-    if (cur) location.replace("#" + h); else { this.pushed = true; location.hash = h; }
-  },
-  openSheet(kind) {
+  openSheet(kind) { this.showSheet(kind); this.push(kind); },
+  closeSheet() { this.back(); },
+  showSheet(kind) {
     this.overlay = kind;
     const el = kind === "help" ? $("#sHelp") : $("#sDetail");
     el.classList.add("open"); el.setAttribute("aria-hidden", "false");
-    this.setHash(kind);
   },
-  closeSheet(fromHash) {
+  hideSheet() {
     const kind = this.overlay; if (!kind) return;
     this.overlay = null;
     const el = kind === "help" ? $("#sHelp") : $("#sDetail");
     el.classList.remove("open"); el.setAttribute("aria-hidden", "true");
-    if (fromHash) return;
-    if (kind === "record" && detail.from === "records") { this.go(0); return; }
-    ctl.needDisturb = false;
-    this.go(1);
-  },
-  fromHash(first) {
-    const h = location.hash.slice(1);
-    if (this.overlay && h !== this.overlay) this.closeSheet(true);
-    if (h === "help") { if (this.overlay !== "help") { help.build(); help.go(0); this.overlay = "help"; $("#sHelp").classList.add("open"); } return; }
-    if (h === "record") { if (!detail.rec) { history.replaceState(null, "", location.pathname + location.search); this.go(1, true); } return; }
-    if (!h) this.pushed = false;
-    // 뒤로 가기는 항상 홈으로
-    if (!first && !h) { this.go(1, true); return; }
-    this.go(h === "records" ? 0 : h === "settings" ? 2 : 1, true);
+    if (kind === "record" && detail.from === "home") ctl.needDisturb = false;
   },
 };
 
@@ -947,7 +1065,8 @@ const installer = {
   installer.init();
   $("#btnImport").onclick = () => $("#fileIn").click();
   $("#fileIn").onchange = e => { const f = [...e.target.files]; e.target.value = ""; records.importFiles(f); };
-  $("#btnExport").onclick = () => (records.selecting ? records.endSelect() : records.startSelect());
+  $("#btnExport").onclick = () => (records.selecting ? nav.back() : records.startSelect("export"));
+  $("#btnDelete").onclick = () => (records.selecting ? nav.back() : records.startSelect("delete"));
   const loop = () => { home.tick(); requestAnimationFrame(loop); };
   requestAnimationFrame(loop);
 })();
