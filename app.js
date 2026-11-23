@@ -301,20 +301,38 @@ const SERIES = [
 /* ───────── 기록 저장소 (IndexedDB) ───────── */
 const cache = new Map();
 /* 기압계: 웹 브라우저에는 아직 기압 센서 API가 없어(크롬 포함) 대부분 '사용 불가'로 자동 비활성화된다.
-   앞으로 PressureSensor가 생기거나 안드로이드 앱으로 옮기면 같은 코드로 바로 동작한다. */
+   · 앞으로 PressureSensor가 생기거나 안드로이드 앱으로 옮기면 같은 코드로 바로 동작한다.
+   · 시험용: 안드로이드 휴대폰의 Termux에서 tools/baro_bridge.py를 돌리고 http://localhost:8080 으로 열면
+     중계기가 휴대폰 기압계 값을 /baro 로 흘려 준다 (EventSource). */
 const baro = {
-  get supported() { return typeof window.PressureSensor === "function"; },
+  bridgeOk: false, live: null, liveAt: 0, rec: false,
+  get supported() { return typeof window.PressureSensor === "function" || this.bridgeOk; },
   get on() { return this.supported && prefs.get("baro", "on") === "on"; },
+  get source() { return typeof window.PressureSensor === "function" ? "sensor" : this.bridgeOk ? "bridge" : null; },
+  connectBridge() {
+    if (!/^(localhost|127\.0\.0\.1)$/.test(location.hostname) || typeof EventSource !== "function") return;
+    try {
+      const es = new EventSource("baro");
+      es.onmessage = e => {
+        const p = parseFloat(e.data); if (!(p > 300 && p < 1200)) return;
+        const first = !this.bridgeOk; this.bridgeOk = true; this.live = p;
+        if (this.rec && !this.paused) this.samples.push({ t: (performance.now() - this.t0) / 1000, p });
+        const now = performance.now();
+        if (first || now - this.liveAt > 1000) { this.liveAt = now; if (typeof settings !== "undefined") settings.renderBaro(); }
+      };
+    } catch (e) { /* 중계기 없음 */ }
+  },
   start(t0) {
-    this.samples = []; this.t0 = t0; this.paused = false; this.recSec = 0;
+    this.samples = []; this.t0 = t0; this.paused = false; this.recSec = 0; this.rec = false;
     if (!this.on) return;
+    if (this.source === "bridge") { this.rec = true; return; }
     try {
       this.sensor = new window.PressureSensor({ frequency: 25 });
       this.sensor.onreading = () => !this.paused && this.samples.push({ t: (performance.now() - this.t0) / 1000, p: this.sensor.pressure });
       this.sensor.start();
     } catch (e) { this.sensor = null; }
   },
-  stop() { try { this.sensor && this.sensor.stop(); } catch (e) { /* 무시 */ } this.sensor = null; return this.samples && this.samples.length > 4 ? this.samples : null; },
+  stop() { this.rec = false; try { this.sensor && this.sensor.stop(); } catch (e) { /* 무시 */ } this.sensor = null; return this.samples && this.samples.length > 4 ? this.samples : null; },
   // 일시정지: 기록된 시간(recSec)까지만 남기고, 재개하면 그 시각부터 이어서 센다
   pause(recSec) { this.paused = true; if (this.samples) this.samples = this.samples.filter(b => b.t <= recSec); this.recSec = recSec; },
   resume() { this.paused = false; this.t0 = performance.now() - (this.recSec || 0) * 1000; },
@@ -325,32 +343,21 @@ function analysisOf(rec) {
   if (!cache.has(k)) {
     const A = Core.analyze(rec.vert, rec.lat, rec.rate, rec.segs);
     if (useBaro) {
-      // 기압계 보정은 속력과 주행 거리에만 (일시정지 구간마다 따로)
-      const f = fuseSegs(A.series.speed, rec);
-      if (f) {
-        A.series.speed = f.speed; A.series.dist = f.dist;
+      // 기압계는 보조: 운행마다 검증을 통과한 경우에만 속력과 주행 거리에 쓴다
+      const f = Core.baroRefine(A.series.speed, rec.rate, rec.baro, A.spans);
+      A.m.baroUse = { used: f.used, total: f.total, reasons: f.reasons };
+      if (f.used) {
+        const dist = new Float32Array(f.speed.length); let d = 0;
+        for (let i = 0; i < f.speed.length; i++) { d += Math.abs(f.speed[i]) / 60 / rec.rate; dist[i] = d; }
+        A.series.speed = f.speed; A.series.dist = dist;
         let up = 0, down = 0; for (const v of f.speed) { if (v > up) up = v; if (-v > down) down = -v; }
-        Object.assign(A.m, { speedUp: up, speedDown: down, speedMax: Math.max(up, down), distance: f.dist[f.dist.length - 1], baro: true });
+        Object.assign(A.m, { speedUp: up, speedDown: down, speedMax: Math.max(up, down), distance: d, baro: true });
         A.m.eval = Core.evaluate(A.m);
       }
     }
     cache.set(k, A);
   }
   return cache.get(k);
-}
-function fuseSegs(speed, rec) {
-  const r = rec.rate, bd = Core.segBounds(speed.length, rec.segs);
-  if (bd.length < 2) return Core.fuseBaro(speed, r, rec.baro);
-  const out = new Float32Array(speed.length), dist = new Float32Array(speed.length);
-  let d = 0, any = false;
-  for (const [a, b] of bd) {
-    const sp = speed.subarray(a, b);
-    const bs = rec.baro.filter(x => x.t >= a / r && x.t < b / r).map(x => ({ t: x.t - a / r, p: x.p }));
-    const f = Core.fuseBaro(sp, r, bs); if (f) any = true;
-    const v = f ? f.speed : sp;
-    for (let i = 0; i < v.length; i++) { out[a + i] = v[i]; d += Math.abs(v[i]) / 60 / r; dist[a + i] = d; }
-  }
-  return any ? { speed: out, dist } : null;
 }
 /** 목록 한줄평: 맨 앞 한 문장만 ("우당탕탕!"은 다음 문장과 함께) */
 function firstSentence(t) {
@@ -834,6 +841,7 @@ const records = {
         const rec = { id: `ride_${startedAt}_${Math.random().toString(36).slice(2, 7)}`, name, startedAt, rate: imp.rate, imported: true,
           vert: imp.vert, lat: imp.lat, updatedAt: Date.now() };
         if (imp.segs) rec.segs = imp.segs;
+        if (imp.baro) rec.baro = imp.baro;
         await store.put(rec); ok++;
       } catch (e) { bad.push(f.name); }
     }
@@ -964,7 +972,8 @@ const settings = {
   renderBaro() {
     const sw = $("#baroSw"), ok = baro.supported;
     sw.disabled = !ok; sw.setAttribute("aria-checked", ok && baro.on ? "true" : "false");
-    $("#baroDesc").textContent = ok ? (baro.on ? "속력과 운행 거리를 기압 변화로 보정해요" : "가속도 센서만으로 계산해요")
+    const live = baro.source === "bridge" && baro.live ? ` · 지금 ${baro.live.toFixed(2)} hPa` : "";
+    $("#baroDesc").textContent = ok ? (baro.on ? "속력과 운행 거리를 기압 변화로 보정해요" : "가속도 센서만으로 계산해요") + live
       : "이 기기(브라우저)에서는 기압계를 쓸 수 없어 꺼져 있어요";
   },
   renderMode() {
@@ -1192,6 +1201,7 @@ const installer = {
   await store.open();
   settings.init();
   ctl.init();
+  baro.connectBridge();
   nav.init();
   home.render();
   records.render();

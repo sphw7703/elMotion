@@ -399,6 +399,7 @@
     };
     const mot = new Float32Array(n), moving = new Uint8Array(n);
     let distOff = 0;
+    const zupt = [];     // [운행 시작, 정지 판정 순간, 그때 남아 있던 속력(m/s)]
     for (const g of plan.groups) {
       const s = g.s, e = g.e;
       let an = new RideAnalyzer(fs);          // 나뉜 구간마다 필터·속력 적분을 새로 시작
@@ -419,8 +420,22 @@
         an = snaps.get(fix.r).clone(); an.hold = fix.hold; from = fix.r;
         for (const k of [...snaps.keys()]) if (k >= fix.r) snaps.delete(k);
       }
+      // 정지 판정 순간에 남아 있던 속력 = 그 운행 동안 쌓인 가속도 센서 오차
+      for (let r = s + 1; r < e; r++) {
+        if (!(moving[r - 1] && !moving[r]) || !snaps.has(r)) continue;
+        let a = r - 1; while (a > s && moving[a - 1]) a--;
+        while (a > s && S.speed[a - 1] !== 0) a--;            // 움직이기 시작한 첫 순간까지
+        zupt.push([a, r, snaps.get(r).v]);
+      }
       if (e > s) distOff = S.dist[e - 1];
     }
+    /* 정지 시점 되짚기 (2026-11-24 사용자 확정): 엘리베이터는 출발 전·도착 후 반드시 속력 0.
+       도착 순간 남은 속력을 운행 시간에 비례해 거꾸로 나눠 빼서 운행 전체의 속력을 바로잡는다. */
+    for (const [a, r, vres] of zupt) {
+      const L = r - a; if (L < 2) continue;
+      for (let k = a; k < r; k++) S.speed[k] -= vres * 60 * (k - a + 1) / L;
+    }
+    if (zupt.length) { let d = 0; for (let i = 0; i < n; i++) { d += Math.abs(S.speed[i]) / 60 / fs; S.dist[i] = d; } }
 
     // 운행 구간 (경계 0~3 근사): moving 구간 + 앞뒤 0.5초 (일시정지 경계는 넘지 않음)
     const pad = Math.round(0.5 * fs);
@@ -491,7 +506,7 @@
     const keep = trips.map((t, k) => k).filter(k => !cutTrips.has(k));
     m.ride = rideShape(vert, keep.map(k => trips[k]), fs, bounds, keep.map(k => lev[k] && lev[k][0]));
     m.eval = evaluate(m);
-    return { series: S, m };
+    return { series: S, m, spans: zupt.map(([a, r]) => [a, r]) };
   }
 
   /* ───────── 가감속 모양 분석 (가감속도 + 저크 + 가가가속도) ─────────
@@ -666,7 +681,7 @@
      흔들림(A95): ~8 아주 훌륭, ~10 좋음, ~20 일반적, ~30 좋지 않음, 그 이상 불쾌
      가감속 모양(가감속도+저크+가가가속도): 내부 점수 → 등급(훌륭/좋아요/무난/아쉬워요/점검) + 한마디 평
      속력: ~70 저속, ~130 중속, ~250 고속, ~500 초고속, 그 이상 '초고속의 초월' */
-  const EVAL_VER = 16;
+  const EVAL_VER = 17;
   function accGrade(a) {
     if (a <= 0.4) return { lv: 0, t: "거의 느껴지지 않을 만큼 순해요", s: "순해요" };
     if (a <= 0.7) return { lv: 1, t: "부드러워요", s: "부드러워요" };
@@ -791,6 +806,71 @@
      기압 → 고도(국제표준대기), 0.5 Hz로 부드럽게 한 뒤 미분해 '기압 속력'을 구한다.
      가속도 적분 속력의 빠른 변화(고역)와 기압 속력의 느린 흐름(저역)을 합치는 상보 필터.
      baro: [{t: 측정 시작 후 초, p: hPa}] */
+  /** 기압계 보조 보정 (2026-11-24 사용자 확정) — 연돌 현상·문 여닫힘·피스톤 효과를 피하려고
+      · 멈춰 있는 동안의 기압은 쓰지 않는다: 운행(출발~정지) 안쪽만 본다
+      · 운행마다 기압 높이(h)를 가속도 높이(z)에 h ≈ α·z + β 로 맞춰 보고,
+        α가 0.85~1.15 밖이거나(이동 높이 차 15% 이상) 맞춘 뒤에도 기압이 튀면(잔차가 크면) 그 운행은 기압을 쓰지 않는다
+      · 초고속(500 m/min 초과)은 카 안 기압을 조절하기도 해서 쓰지 않는다
+      · 통과하면 높이 비율은 가속도와 기압의 중간(√α)으로 맞추고, 운행 중 느리게 쌓이는 오차를 기압으로 바로잡는다 */
+  function baroRefine(speed, fs, baro, spans) {
+    const n = speed.length;
+    const res = { speed: Float32Array.from(speed), used: 0, total: 0, reasons: [] };
+    if (!baro || baro.length < 5 || !spans || !spans.length) return res;
+    const bt = baro.map(b => b.t), bh = baro.map(b => 44330 * (1 - Math.pow(b.p / baro[0].p, 1 / 5.255)));
+    for (const [a, r] of spans) {
+      let pk = 0; for (let i = a; i < r; i++) pk = Math.max(pk, Math.abs(speed[i]));
+      if (pk < 6) continue;
+      res.total++;
+      if (pk > 500) { res.reasons.push("초고속"); continue; }
+      const t0 = a / fs, t1 = r / fs, idx = [];
+      for (let k = 0; k < bt.length; k++) if (bt[k] >= t0 && bt[k] <= t1) idx.push(k);
+      if (idx.length < Math.max(8, (t1 - t0) * 2)) { res.reasons.push("기압 표본 부족"); continue; }
+      // 가속도 높이 z(t)
+      const z = new Float64Array(r - a + 1); for (let i = a; i < r; i++) z[i - a + 1] = z[i - a] + speed[i] / 60 / fs;
+      const zAt = t => z[Math.max(0, Math.min(z.length - 1, Math.round(t * fs) - a))];
+      const X = idx.map(k => zAt(bt[k])), Y = idx.map(k => bh[k]);
+      const dz = z[z.length - 1];
+      if (Math.abs(dz) < 1.5) { res.reasons.push("이동이 짧음"); continue; }
+      const mx = X.reduce((p, q) => p + q, 0) / X.length, my = Y.reduce((p, q) => p + q, 0) / Y.length;
+      let sxy = 0, sxx = 0; for (let k = 0; k < X.length; k++) { sxy += (X[k] - mx) * (Y[k] - my); sxx += (X[k] - mx) ** 2; }
+      const al = sxx > 0 ? sxy / sxx : 0, be = my - al * mx;
+      let rss = 0; for (let k = 0; k < X.length; k++) rss += (Y[k] - (al * X[k] + be)) ** 2;
+      const rms = Math.sqrt(rss / X.length);
+      if (!(al >= 0.85 && al <= 1.15)) { res.reasons.push("이동 높이 불일치"); continue; }
+      if (rms > Math.max(0.4, 0.05 * Math.abs(dz))) { res.reasons.push("기압이 튐"); continue; }
+      // 통과: 높이 비율은 가속도(되짚기 후)와 기압(승강로 공기 온도에 따라 몇 % 틀어짐)의 중간으로 맞추고(÷√α),
+      // 60 Hz로 이어 둘의 속력 차이(느리게 변하는 오차)만 빼 준다
+      const sc = Math.sqrt(al), hz = new Float64Array(r - a); let j = 0;
+      for (let i = a; i < r; i++) {
+        const t = i / fs; while (j < idx.length - 2 && bt[idx[j + 1]] < t) j++;
+        const k0 = idx[j], k1 = idx[Math.min(j + 1, idx.length - 1)];
+        const h = bt[k1] > bt[k0] ? bh[k0] + (bh[k1] - bh[k0]) * clamp01((t - bt[k0]) / (bt[k1] - bt[k0])) : bh[k0];
+        hz[i - a] = (h - be) / sc;
+      }
+      // 운행 중 기압이 튀었는지: 1초 간격으로 잰 기압 속력과 가속도 속력의 차이
+      { const W = Math.round(0.5 * fs); let worst = 0;
+        for (let i = a + W; i < r - W; i++) {
+          const vb = (hz[i - a + W] - hz[i - a - W]) / (2 * W / fs) * 60, va = (z[i - a + W + 1] - z[i - a - W + 1]) / (2 * W / fs) * 60;
+          worst = Math.max(worst, Math.abs(vb - va));
+        }
+        if (worst > Math.max(12, 0.15 * pk)) { res.reasons.push("기압이 튐"); continue; } }
+      const fA1 = Biquad.make(0.4, fs, false), fA2 = Biquad.make(0.4, fs, false), fB1 = Biquad.make(0.4, fs, false), fB2 = Biquad.make(0.4, fs, false);
+      const k = 1 / (3 * fs); let prev = null, err = 0;
+      // 필터 시작 흔들림을 줄이려고 첫 값으로 채운 뒤 시작
+      for (let w = 0; w < fs; w++) { fB2.process(fB1.process(hz[0])); fA2.process(fA1.process(0)); }
+      prev = hz[0];
+      for (let i = a; i < r; i++) {
+        const hs = fB2.process(fB1.process(hz[i - a])), vb = (hs - prev) * fs * 60; prev = hs;
+        const va = fA2.process(fA1.process(speed[i]));
+        err += k * ((va - vb) - err);
+        // 출발·도착 무렵은 0으로 묶여 있으니(정지 시점 되짚기) 오차 보정을 서서히 들이고 내보낸다
+        const w = Math.min(1, (i - a) / fs, (r - i) / fs);
+        res.speed[i] = speed[i] - err * w;
+      }
+      res.used++;
+    }
+    return res;
+  }
   function fuseBaro(speed, fs, baro) {
     const n = speed.length;
     if (!baro || baro.length < 5 || n < fs) return null;
@@ -876,12 +956,15 @@
     let hasE = false;
     // elMotion에서 내보낸 파일의 일시정지 구간 번호 (segment 열)
     const segCol = (rows[2] || []).findIndex(c => String(c).trim() === "segment");
+    const prCol = (rows[2] || []).findIndex(c => String(c).trim() === "pressure_hpa");
+    const pr = [];
     for (let r = 3; r < rows.length; r++) {
       const row = rows[r];
       const tv = num(row[0]), bv = num(row[1]);
       if (Number.isNaN(tv) || Number.isNaN(bv)) continue;
       const ev = num(row[4]);
       t.push(tv); b.push(bv); e.push(ev); if (segCol >= 0) sg.push(num(row[segCol]));
+      if (prCol >= 0) { const pv = num(row[prCol]); if (!Number.isNaN(pv)) pr.push({ k: t.length - 1, p: pv }); }
       if (!Number.isNaN(ev)) hasE = true;
     }
     if (b.length < 10) throw new Error("A4·B4 아래에 숫자 데이터가 부족해요");
@@ -921,7 +1004,8 @@
       for (let k = 1; k < sg.length; k++) if (sg[k] !== sg[k - 1] && !Number.isNaN(sg[k])) st.push(Math.round(ts[k] * FS));
       if (st.length > 1) segs = st;
     }
-    return { vert: vN.data, lat: lN ? lN.data : null, rate: FS, startedAt, segs, info: { srcRate, vertUnit: vN.unit, latUnit: lN ? lN.unit : null } };
+    const baro = pr.length > 4 ? pr.map(({ k, p }) => ({ t: ts[k], p })) : null;
+    return { vert: vN.data, lat: lN ? lN.data : null, rate: FS, startedAt, segs, baro, info: { srcRate, vertUnit: vN.unit, latUnit: lN ? lN.unit : null } };
   }
 
   function exportCsv(rec, A) {
@@ -931,12 +1015,16 @@
     const lines = [
       `# name,"${(rec.name || "").replace(/"/g, '""')}"`,
       `# started_at,${when},sample_rate_hz,${rec.rate}`,
-      "time_s,vertical_accel_m_s2,accel_m_s2,jerk_m_s3,lateral_accel_m_s2,vertical_vib_gal,lateral_vib_gal,speed_m_min,distance_m,segment",
+      "time_s,vertical_accel_m_s2,accel_m_s2,jerk_m_s3,lateral_accel_m_s2,vertical_vib_gal,lateral_vib_gal,speed_m_min,distance_m,segment,pressure_hpa",
     ];
     const bd = segBounds(n, rec.segs);
+    // 기압: 측정한 시각 그대로, 그 시각에 가장 가까운 줄에 적는다 (나머지 줄은 빈칸)
+    const pr = new Map();
+    if (rec.baro) for (const b of rec.baro) { const i = Math.round(b.t * rec.rate); if (i >= 0 && i < n && !pr.has(i)) pr.set(i, b.p); }
     for (let k = 0; k < bd.length; k++) for (let i = bd[k][0]; i < bd[k][1]; i++) {
       lines.push([(i / rec.rate).toFixed(4), f(rec.vert[i]), f(S.acc[i]), f(S.jerk[i]),
-        rec.lat ? f(rec.lat[i]) : "", f(S.vibV[i], 2), rec.lat ? f(S.vibL[i], 2) : "", f(S.speed[i], 2), f(S.dist[i], 3), k + 1].join(","));
+        rec.lat ? f(rec.lat[i]) : "", f(S.vibV[i], 2), rec.lat ? f(S.vibL[i], 2) : "", f(S.speed[i], 2), f(S.dist[i], 3), k + 1,
+        pr.has(i) ? pr.get(i).toFixed(4) : ""].join(","));
     }
     return lines.join("\n") + "\n";
   }
@@ -1002,7 +1090,7 @@
 
   const Core = {
     FS, P, Biquad, Resampler, StabilityDetector, Calibration, AbnormalDetector, PeakToPeak, RideAnalyzer,
-    analyze, segBounds, evaluate, rideShape, _dbg: { zp, grad, peaks }, fuseBaro, EVAL_VER, ppStats, percentile, parseCsv, importCsv, exportCsv, DemoSignal,
+    analyze, segBounds, baroRefine, evaluate, rideShape, _dbg: { zp, grad, peaks }, fuseBaro, EVAL_VER, ppStats, percentile, parseCsv, importCsv, exportCsv, DemoSignal,
   };
   if (typeof module !== "undefined" && module.exports) module.exports = Core;
   else root.Core = Core;
