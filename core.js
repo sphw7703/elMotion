@@ -384,6 +384,7 @@
     let jerk = 0, stop = -1e9, kick = 0;
     for (let i = A0; i < D1; i++) jerk = Math.max(jerk, Math.abs(J[i]));
     for (let i = mid; i < D1; i++) stop = Math.max(stop, J[i]);
+    let jerkA = 0; for (let i = A0; i < mid; i++) jerkA = Math.max(jerkA, Math.abs(J[i]));
     for (let i = Math.max(0, on - Math.round(.3 * fs)); i < Math.min(n, on + Math.round(.4 * fs)); i++) kick = Math.max(kick, Math.abs(j5[i] * sg));
     const hump = (lo, hi) => peaks(J, lo, hi, .15, HUMP_PR, 1) + peaks(J, lo, hi, .15, HUMP_PR, -1);
     const extra = hump(A0, mid) + hump(mid, D1) - 4;
@@ -395,7 +396,7 @@
     const F = Math.round(fs);
     const snap = [sAbs(i0 - F, i0 + F), sAbs(i0 + F / 2, mid), sAbs(mid, i1 - F / 2), sAbs(i1 - F, i1 + 1.5 * F)];
     const startCut = pA[0] > .1 * acc, endCut = pD[pD.length - 1] > .1 * dec;
-    return { dir: sg, acc, dec, jerk, stop, kick, tA, tD, trA: trend(pA), trD: trend(pD), extra, hf, lobA, lobD, snap,
+    return { dir: sg, acc, dec, jerk, jerkA, stop, kick, tA, tD, trA: trend(pA), trD: trend(pD), extra, hf, lobA, lobD, snap,
       relA: startCut ? null : engRel(pA), relD: endCut ? null : engRel(pD) };
   }
 
@@ -404,7 +405,10 @@
   function judgeOne(r) {
     const a = Math.max(r.acc, r.dec), j = r.jerk, bad = [], ch = [];
     let p = a <= .7 ? 0 : a <= 1.3 ? 15 * (a - .7) / .6 : 15 + 25 * ramp(a, 1.3, 1.8);
-    p += j <= .8 ? 0 : j <= 1.6 ? 25 * (j - .8) / .8 : 25 + 15 * ramp(j, 1.6, 2.4);
+    const jolt = r.kick >= 2.2;                          // 덜컥: 출발 직전 저크가 크게 흔들림
+    const rough = jolt || r.stop >= 1.3 || r.lobA >= 2 || r.kick >= 3 || r.extra >= 4 || r.hf >= .035;
+    const j0 = rough ? .8 : 1.2;                          // 깔끔하게 당기는 저크는 1.2까지 감점 없음
+    p += j <= j0 ? 0 : j <= 1.6 ? 25 * (j - j0) / .8 : 25 * (1.6 - j0) / .8 + 15 * ramp(j, 1.6, 2.4);
     if (r.stop >= 1.3) { bad.push("thud"); p += 8; }
     if (r.lobA >= 2 || r.kick >= 3) { bad.push("bounce"); p += 8; }
     if (r.extra >= 4 || r.hf >= .035) { bad.push("wave"); p += 8; }
@@ -420,7 +424,7 @@
     if (r.tD.rel >= 1.8 && !bad.includes("slowStop")) ch.push("fadeBrake");
     if (a >= .8 && !bad.includes("bounce") && !bad.includes("wave")) ch.push(r.tA.plat >= 2 ? "pull" : "firm");
     if (a >= .55 && a < .8 && j <= .8 && !bad.length && r.tA.plat >= 1.2 && !ch.length) ch.push("softFirm");
-    return { score: Math.max(0, Math.round(100 - p)), bad, ch };
+    return { score: Math.max(0, Math.round(100 - p)), bad, ch, jolt };
   }
 
   function rideShape(vert, trips, fs) {
@@ -444,18 +448,22 @@
      흔들림(A95): ~8 아주 훌륭, ~10 좋음, ~20 일반적, ~30 좋지 않음, 그 이상 불쾌
      가감속 모양(가감속도+저크+가가가속도): 내부 점수 → 등급(훌륭/좋아요/무난/아쉬워요/점검) + 한마디 평
      속력: ~70 저속, ~130 중속, ~250 고속, ~500 초고속, 그 이상 '초고속의 초월' */
-  const EVAL_VER = 5;
+  const EVAL_VER = 7;
   function accGrade(a) {
     if (a <= 0.4) return { lv: 0, t: "거의 느껴지지 않을 만큼 순해요", s: "순해요" };
     if (a <= 0.7) return { lv: 1, t: "부드러워요", s: "부드러워요" };
     if (a <= 1.3) return { lv: 3, t: "강하게 느껴져요", s: "강해요" };
     return { lv: 4, t: "불편하게 느껴질 수 있어요", s: "불편해요" };
   }
-  function jerkGrade(j) {
+  function jerkGrade(j, R) {
+    const way = R && R.dir < 0 ? "내려가요" : "올라가요";
+    if (R && R.bad.includes("thud")) return { lv: 4, t: "멈추기 직전에 덜컹해요", s: "덜컹해요" };
+    if (R && R.bad.includes("bounce")) return { lv: 4, t: "출발이 쿵 하고 튀어요", s: "쿵 하고 튀어요" };
+    if (R ? R.jolt : j > .8) return { lv: 3, t: "출발할 때 덜컥여요", s: "덜컥여요" };
     if (j <= 0.5) return { lv: 0, t: "출발과 정지가 아주 매끄러워요", s: "아주 좋아요" };
     if (j <= 0.8) return { lv: 1, t: "출발과 정지가 매끄러워요", s: "좋아요" };
-    if (j <= 1.2) return { lv: 3, t: "출발·정지 때 덜컥임이 느껴져요", s: "덜컥여요" };
-    return { lv: 4, t: "출발·정지가 우당탕탕 거칠어요", s: "우당탕탕" };
+    if (j <= 1.6) return { lv: 1, t: `쑤욱 빨려 ${way}`, s: `쑤욱 빨려 ${way}` };
+    return { lv: 3, t: "세게 잡아당겨요", s: "세게 당겨요" };
   }
   function vibGrade(a95) {
     if (a95 <= 8) return { lv: 0, t: "아주 훌륭해요", s: "훌륭해요" };
@@ -496,7 +504,7 @@
     wobble: ["가감속 중에 살짝 울렁여요", "살짝 울렁이는 구간이 있어요"],
     twice: ["감속을 2번 하네요", "브레이크를 두 번에 나눠 밟아요"],
     slowStop: ["감속을 스르르 풀며 뜸 들이다 멈춰요", "멈출 듯 말 듯 스르르 멈춰요"],
-    grabRelease: ["꽉 잡았다가 스르르 놓아줘요", "힘껏 출발했다가 스르르 풀어요"],
+    grabRelease: ["쑤욱 빨려 올라갔다가 스르르 놓아줘요"], grabReleaseDown: ["쑤욱 빨려 내려갔다가 스르르 놓아줘요"],
     easeSnap: ["슬며시 잡았다가 팍 놓아요"],
     fadeBrake: ["브레이크를 점점 풀며 멈춰요"],
     pull: ["쭉 빨려 올라가요"], pullDown: ["쭉 빨려 내려가요"],
@@ -507,7 +515,7 @@
   const GRADE_TXT = { "훌륭해요": "승차감이 훌륭해요.", "좋아요": "승차감이 좋아요.", "무난해요": "승차감은 무난해요.", "아쉬워요": "승차감이 조금 아쉬워요.", "점검이 필요해요": "점검이 필요해 보여요." };
   function rideLine(R, m, vV, vL) {
     const seed = Math.floor((m.jerkMax + m.accPeak + m.distance) * 997);
-    const pick = (k, i) => { const arr = RIDE_TXT[k === "pull" && R.dir < 0 ? "pullDown" : k]; return arr[(seed + i) % arr.length]; };
+    const pick = (k, i) => { const arr = RIDE_TXT[(k === "pull" || k === "grabRelease") && R.dir < 0 ? k + "Down" : k]; return arr[(seed + i) % arr.length]; };
     const ORDER = ["bounce", "pull", "firm", "softFirm", "grabRelease", "easeSnap", "wave", "wobble", "twice", "fadeBrake", "slowStop", "thud"];
     const keys = [...R.bad.slice(0, 2), ...R.ch.slice(0, Math.max(0, 2 - R.bad.length))].sort((x, y) => ORDER.indexOf(x) - ORDER.indexOf(y));
     if (!keys.length && R.score >= 95) keys.push("great");
@@ -521,7 +529,7 @@
   }
   function evaluate(m) {
     const acc = accGrade(m.accPeak);
-    const jerk = jerkGrade(m.jerkMax);
+    const jerk = jerkGrade(m.jerkMax, m.ride);
     const vV = vibGrade(m.vibV.a95);
     const vL = m.vibL ? vibGrade(m.vibL.a95) : null;
     const dirs = m.speedUp > 3 && m.speedDown > 3 ? "상승·하강" : m.speedUp > 3 ? "상승" : m.speedDown > 3 ? "하강" : "";
