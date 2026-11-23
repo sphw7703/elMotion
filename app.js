@@ -877,20 +877,12 @@ const help = {
       <rect x="86" y="20" width="128" height="260" rx="28" fill="var(--ink)"/><rect x="92" y="26" width="116" height="248" rx="23" fill="url(#hscr)"/>
       <rect x="132" y="34" width="36" height="8" rx="4" fill="var(--ink)"/>
       <circle cx="150" cy="128" r="46" fill="rgba(255,255,255,.55)"/>
-      <g clip-path="url(#hcl)"><g class="h2-water"><path d="M60 0 q15 -6 30 0 t30 0 t30 0 t30 0 t30 0 t30 0 v120 h-180 z" fill="url(#hw)" class="h2-wave"/></g></g>
+      <g clip-path="url(#hcl)"><g class="h2-water"><path d="M60 0 q15 -6 30 0 t30 0 t30 0 t30 0 t30 0 t30 0 t30 0 t30 0 t30 0 v120 h-270 z" fill="url(#hw)" class="h2-wave"/></g></g>
       <circle cx="150" cy="128" r="46" fill="none" stroke="#fff" stroke-width="2"/><ellipse cx="136" cy="108" rx="16" ry="9" fill="rgba(255,255,255,.7)"/>
       <rect class="h2-txt" x="112" y="190" width="76" height="10" rx="5" fill="#9AA0B8"/><rect x="122" y="208" width="56" height="8" rx="4" fill="#C9CDDB"/>
       <rect x="112" y="240" width="76" height="20" rx="10" fill="#fff" stroke="#E1E4EF"/></svg>`;
-    const skin = `fill="#F4CDB4" stroke="#D49C7A" stroke-width="1.6" stroke-linejoin="round"`;
     const s3 = `<svg viewBox="0 0 300 300" class="ill">${defs}${car}
-      <g clip-path="url(#hcar)"><g class="h3-lift">
-        <g class="h3-hand"><path ${skin} d="M262 300 L214 300 C206 262 194 226 184 196 C178 178 176 160 182 146 C188 134 204 134 210 148 C216 166 220 190 230 214 C240 240 252 268 266 290 Z"/></g>
-        ${phone(132, 96, 36, 76)}
-        <g class="h3-front">
-          <rect ${skin} x="123" y="117" width="17" height="11" rx="5.5"/><rect ${skin} x="121" y="130" width="19" height="11" rx="5.5"/>
-          <rect ${skin} x="121" y="143" width="19" height="11" rx="5.5"/><rect ${skin} x="123" y="156" width="17" height="10" rx="5"/>
-          <path ${skin} d="M190 166 C184 154 176 146 166 142 C158 139 153 145 158 151 C164 157 172 164 176 174 Z"/></g>
-      </g></g>
+      <g clip-path="url(#hcar)"><g class="h3-lift">${phone(132, 96, 36, 76)}</g></g>
       <g class="h3-badge"><rect x="98" y="34" width="104" height="30" rx="9" fill="#D23F47"/><rect x="113" y="44" width="10" height="10" rx="2" fill="#fff"/><text x="160" y="54" font-size="12" font-weight="800" fill="#fff" text-anchor="middle" font-family="NanumSquareNeo, sans-serif">측정 종료</text></g></svg>`;
     $("#helpIn").innerHTML = `<style>
       .h1-phone { animation: h1 3.4s cubic-bezier(.3,.7,.3,1) infinite; }
@@ -903,15 +895,11 @@ const help = {
       @keyframes h2w { to { transform: translateX(-60px); } }
       .h2-txt { animation: h2t 3.6s ease infinite; }
       @keyframes h2t { 0%, 20% { opacity: .3; } 40%, 60% { opacity: 1; } 75%, 100% { opacity: 0; } }
-      .h3-hand { animation: h3h 4s cubic-bezier(.3,.7,.3,1) infinite; }
-      @keyframes h3h { 0% { transform: translate(80px, 110px); opacity: 0; } 12% { opacity: 1; } 36%, 100% { transform: none; opacity: 1; } }
-      .h3-front { animation: h3f 4s linear infinite; }
-      @keyframes h3f { 0%, 30% { opacity: 0; } 37%, 100% { opacity: 1; } }
       .h3-lift { animation: h3 4s cubic-bezier(.5,0,.3,1) infinite; }
-      @keyframes h3 { 0%, 44% { transform: none; opacity: 1; } 82% { transform: translate(60px, -190px) rotate(8deg); opacity: 1; } 90%, 100% { transform: translate(60px, -190px) rotate(8deg); opacity: 0; } }
+      @keyframes h3 { 0%, 30% { transform: none; opacity: 1; } 75% { transform: translateY(-190px); opacity: 1; } 84%, 100% { transform: translateY(-190px); opacity: 0; } }
       .h3-badge { animation: h3b 4s ease infinite; transform-origin: 150px 49px; }
-      @keyframes h3b { 0%, 60% { opacity: 0; transform: scale(.6); } 68%, 94% { opacity: 1; transform: scale(1); } 100% { opacity: 0; } }
-      @media (prefers-reduced-motion: reduce) { .h1-phone, .h1-ring, .h2-water, .h2-wave, .h2-txt, .h3-lift, .h3-hand, .h3-front, .h3-badge { animation: none; opacity: 1; } }
+      @keyframes h3b { 0%, 55% { opacity: 0; transform: scale(.6); } 63%, 94% { opacity: 1; transform: scale(1); } 100% { opacity: 0; } }
+      @media (prefers-reduced-motion: reduce) { .h1-phone, .h1-ring, .h2-water, .h2-wave, .h2-txt, .h3-lift, .h3-badge { animation: none; opacity: 1; } }
     </style>
     <div class="top"><span class="help-sec">측정 방법</span><span style="flex:1"></span><button class="round-btn" id="hClose" aria-label="닫기">${ICON.close}</button></div>
     <div class="help-track" id="hTrack">
