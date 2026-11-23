@@ -197,6 +197,12 @@ class Chart {
       g.fillText(`${+t.toFixed(1)}s`, clamp(px, L + 8, R - 8), B + 6);
     }
     if (n < 2) return;
+    // 평가 구간(정속 주행) 옅게 표시
+    const inSpan = i => !o.spans || o.spans.some(([a, b]) => i >= a * rate && i <= b * rate);
+    if (o.spans) {
+      g.fillStyle = hexA(o.color, .09);
+      for (const [a, b] of o.spans) { const xa = x(Math.round(a * rate)), xb = x(Math.round(b * rate)); g.fillRect(xa, T, Math.max(1, xb - xa), ph); }
+    }
     // 선 (점이 많으면 픽셀 열마다 최소/최대)
     const upto = Math.floor((n - 1) * this.prog);
     g.save(); g.beginPath(); g.rect(L, T - 2, pw * (o.window ? 1 : this.prog) + 1, ph + 4); g.clip();
@@ -224,7 +230,9 @@ class Chart {
     // 최고·최저 표시 (기록 그래프): 점 + 세로 지시선 + 값
     if (o.marks && n > 1 && this.prog >= 1) {
       let hi = 0, lo = 0;
-      for (let i = 1; i < n; i++) { if (v[i] > v[hi]) hi = i; if (v[i] < v[lo]) lo = i; }
+      hi = lo = -1;
+      for (let i = 0; i < n; i++) { if (!inSpan(i) || Number.isNaN(v[i])) continue; if (hi < 0 || v[i] > v[hi]) hi = i; if (lo < 0 || v[i] < v[lo]) lo = i; }
+      if (hi < 0) hi = lo = 0;
       g.font = `800 11px ${cssVar("--font-num")}`; g.textAlign = "center";
       const mark = (i, above) => {
         const val = v[i]; if (Number.isNaN(val) || Math.abs(val) < Math.pow(10, -o.dec)) return;
@@ -799,7 +807,7 @@ const detail = {
         <div class="e ${c.e2 ? "two" : ""} ${c.lv >= 0 ? "lv" + c.lv : ""}">${c.e2 ? c.e2.map(x => `<span>${esc(x)}</span>`).join("") : esc(c.e)}</div></div>`).join("")}</div>
       <div class="charts">${series.map((s, i) => `<div class="chart-card glass fade-in" style="animation-delay:${0.1 + i * 0.08}s">
         <div class="h"><b>${s.title}</b><span>${s.unit}</span><em>${esc(comment[s.key] || "")}</em></div><canvas class="chart" id="dc-${s.key}" style="height:180px"></canvas></div>`).join("")}</div>`;
-    series.forEach(s => new Chart($(`#dc-${s.key}`), { values: S[s.key], rate: r.rate, color: s.color, half: s.half, dec: s.dec, unit: s.unit, animate: true, tap: true, marks: s.key === "speed" ? "peak" : true }));
+    series.forEach(s => new Chart($(`#dc-${s.key}`), { values: S[s.key], rate: r.rate, color: s.color, half: s.half, dec: s.dec, unit: s.unit, animate: true, tap: true, marks: s.key === "speed" ? "peak" : true, spans: (s.key === "vibV" || s.key === "vibL") && A.m.cruise.length ? A.m.cruise : null }));
   },
 };
 

@@ -279,18 +279,25 @@
     }
     const tripMask = new Uint8Array(n);
     for (const [a, b] of trips) for (let k = a; k <= b; k++) tripMask[k] = 1;
-    // 정속 구간 (수직 진동 평가): 운행 중 가감속 거의 없음 + 속력이 그 운행 최고의 70% 이상
+    // 정속 구간 (상하·좌우 흔들림 평가): 가속이 끝난 뒤부터 감속이 시작되기 전까지
+    const cruise = [], cruiseMask = new Uint8Array(n);
     const constMask = new Uint8Array(n);
     let constCount = 0;
     for (const [a, b] of trips) {
       let pk = 0; for (let k = a; k <= b; k++) pk = Math.max(pk, Math.abs(S.speed[k]));
+      if (pk <= 6) continue;
+      let s0 = -1, s1 = -1;
       for (let k = a; k <= b; k++) {
-        if (Math.abs(mot[k]) < P.MOVE && Math.abs(S.speed[k]) > 0.7 * pk && pk > 6) { constMask[k] = 1; constCount++; }
+        const ok = Math.abs(mot[k]) < P.MOVE && Math.abs(S.speed[k]) >= 0.9 * pk;
+        if (Math.abs(mot[k]) < P.MOVE && Math.abs(S.speed[k]) > 0.7 * pk) { constMask[k] = 1; constCount++; }
+        if (ok) { if (s0 < 0) s0 = k; s1 = k; }
       }
+      const m = Math.round(0.8 * fs);   // 가감속 직후·직전의 여파는 빼고
+      if (s0 >= 0 && s1 - s0 - 2 * m >= fs) { cruise.push([s0 + m, s1 - m]); for (let k = s0 + m; k <= s1 - m; k++) cruiseMask[k] = 1; }
     }
     const all = new Uint8Array(n).fill(1);
-    const vMask = constCount >= fs ? constMask : (trips.length ? tripMask : all);
-    const lMask = trips.length ? tripMask : all;
+    const vMask = cruise.length ? cruiseMask : constCount >= fs ? constMask : (trips.length ? tripMask : all);
+    const lMask = vMask;
 
     const vibV = ppStats(S.vibV, vMask, fs);
     const vibL = hasLat ? ppStats(S.vibL, lMask, fs) : null;
@@ -310,7 +317,7 @@
       duration: n / fs, trips: trips.length,
       accMax, decMax, accPeak: Math.max(accMax, decMax),
       jerkMax, vibV, vibL, speedUp: up, speedDown: down, speedMax: Math.max(up, down),
-      distance: n ? S.dist[n - 1] : 0,
+      distance: n ? S.dist[n - 1] : 0, cruise: cruise.map(([a, b]) => [a / fs, b / fs]),
     };
     m.ride = rideShape(vert, trips, fs);
     m.eval = evaluate(m);
@@ -386,17 +393,22 @@
     for (let i = mid; i < D1; i++) stop = Math.max(stop, J[i]);
     let jerkA = 0; for (let i = A0; i < mid; i++) jerkA = Math.max(jerkA, Math.abs(J[i]));
     for (let i = Math.max(0, on - Math.round(.3 * fs)); i < Math.min(n, on + Math.round(.4 * fs)); i++) kick = Math.max(kick, Math.abs(j5[i] * sg));
-    const hump = (lo, hi) => peaks(J, lo, hi, .15, HUMP_PR, 1) + peaks(J, lo, hi, .15, HUMP_PR, -1);
+    const F = Math.round(fs);
+    // 저크 잡음 수준(운행 한가운데 정속 구간)에 맞춰 봉우리 기준을 올린다: 센서 잡음을 울렁임으로 오인하지 않게
+    let js = 0, jn = 0; for (let i = Math.max(0, mid - F); i < Math.min(n, mid + F); i++) { js += J[i] * J[i]; jn++; }
+    const jNoise = jn ? Math.sqrt(js / jn) : 0, hH = Math.max(.15, 4 * jNoise), hP = Math.max(HUMP_PR, 4 * jNoise);
+    const hump = (lo, hi) => peaks(J, lo, hi, hH, hP, 1) + peaks(J, lo, hi, hH, hP, -1);
     const extra = hump(A0, mid) + hump(mid, D1) - 4;
     let hs = 0, hn = 0, hm = 0;
     for (let i = 0; i < pA.length; i++) if (pA[i] >= .3 * acc) { const q = a5[A0 + i] - a2[A0 + i]; hs += q * q; hm += q; hn++; }
     const hf = hn ? Math.sqrt(Math.max(0, hs / hn - (hm / hn) ** 2)) : 0;
     const lobA = peaks(pA, 0, pA.length, .2, .12), lobD = peaks(pD, 0, pD.length, .2, .12);
+    // 가감속도의 출렁임: 가속·감속 봉우리 안에서 두 번째로 큰 봉우리의 돌출도 (m/s²)
+    const undA = proms(pA, 0, pA.length, .1)[1] || 0, undD = proms(pD, 0, pD.length, .1)[1] || 0;
     const sAbs = (lo, hi) => { let m = 0; for (let i = Math.max(0, lo); i < Math.min(n, hi); i++) m = Math.max(m, Math.abs(S[i])); return m; };
-    const F = Math.round(fs);
     const snap = [sAbs(i0 - F, i0 + F), sAbs(i0 + F / 2, mid), sAbs(mid, i1 - F / 2), sAbs(i1 - F, i1 + 1.5 * F)];
     const startCut = pA[0] > .1 * acc, endCut = pD[pD.length - 1] > .1 * dec;
-    return { dir: sg, acc, dec, jerk, jerkA, stop, kick, tA, tD, trA: trend(pA), trD: trend(pD), extra, hf, lobA, lobD, snap,
+    return { dir: sg, acc, dec, jerk, jerkA, stop, kick, undA, undD, tA, tD, trA: trend(pA), trD: trend(pD), extra, hf, lobA, lobD, snap,
       relA: startCut ? null : engRel(pA), relD: endCut ? null : engRel(pD) };
   }
 
@@ -411,7 +423,8 @@
     p += j <= j0 ? 0 : j <= 1.6 ? 25 * (j - j0) / .8 : 25 * (1.6 - j0) / .8 + 15 * ramp(j, 1.6, 2.4);
     if (r.stop >= 1.3) { bad.push("thud"); p += 8; }
     if (r.lobA >= 2 || r.kick >= 3) { bad.push("bounce"); p += 8; }
-    if (r.extra >= 4 || r.hf >= .035) { bad.push("wave"); p += 8; }
+    // 출렁: 가감속 중 2~5 Hz 잔물결이 크고 저크 봉우리도 여러 번 꺾여야 (둘 중 하나만으론 판정하지 않음)
+    if ((r.hf >= .038 && r.extra >= 3) || r.hf >= .05) { bad.push("wave"); p += 8; }
     else if (r.extra >= 2 && !bad.includes("thud")) { bad.push("wobble"); p += 3; }
     if (r.lobD >= 2 && !bad.includes("thud")) { bad.push("twice"); p += 5; }
     for (const v of r.snap) p += 3 * ramp(v, 5, 10) + 5 * ramp(v, 10, 20);      // 가가가속도: 모서리가 각질수록
@@ -435,7 +448,7 @@
       const lo = Math.max(0, a - Math.round(1.5 * fs)), hi = Math.min(vert.length, b + Math.round(1.5 * fs));
       const seg = Float64Array.from(vert.subarray ? vert.subarray(lo, hi) : vert.slice(lo, hi), q => q - med);
       const r = shapeOne(seg, fs); if (!r) continue;
-      const jd = judgeOne(r); jd.dir = r.dir;
+      const jd = judgeOne(r); jd.dir = r.dir; jd._r = r;
       if (!worst || jd.score < worst.score) worst = jd;
     }
     return worst;
@@ -448,7 +461,7 @@
      흔들림(A95): ~8 아주 훌륭, ~10 좋음, ~20 일반적, ~30 좋지 않음, 그 이상 불쾌
      가감속 모양(가감속도+저크+가가가속도): 내부 점수 → 등급(훌륭/좋아요/무난/아쉬워요/점검) + 한마디 평
      속력: ~70 저속, ~130 중속, ~250 고속, ~500 초고속, 그 이상 '초고속의 초월' */
-  const EVAL_VER = 8;
+  const EVAL_VER = 9;
   function accGrade(a) {
     if (a <= 0.4) return { lv: 0, t: "거의 느껴지지 않을 만큼 순해요", s: "순해요" };
     if (a <= 0.7) return { lv: 1, t: "부드러워요", s: "부드러워요" };
@@ -600,6 +613,20 @@
       d += Math.abs(out[i]) / 60 / fs; dist[i] = d;
     }
     return { speed: out, dist };
+  }
+  /** 봉우리들의 돌출도 목록 (큰 순) */
+  function proms(x, lo, hi, h) {
+    const out = [];
+    for (let i = lo + 1; i < hi - 1; i++) {
+      const v = x[i];
+      if (v < h || !(v > x[i - 1] && v >= x[i + 1])) continue;
+      let lm = v, k = i - 1; while (k >= lo && x[k] <= v) { lm = Math.min(lm, x[k]); k--; }
+      if (k < lo) lm = Math.min(lm, 0);
+      let rm = v; k = i + 1; while (k < hi && x[k] <= v) { rm = Math.min(rm, x[k]); k++; }
+      if (k >= hi) rm = Math.min(rm, 0);
+      out.push(v - Math.max(lm, rm));
+    }
+    return out.sort((a, b) => b - a);
   }
   const clamp01 = v => (v < 0 ? 0 : v > 1 ? 1 : v);
 
