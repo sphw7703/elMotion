@@ -348,6 +348,28 @@ body { background: var(--page-bg); background-attachment: fixed; }
 :root[data-ui="dark"] .toast { background: rgba(28, 38, 72, .88); color: #fff; }
 #btnInstall { display: none !important; }
 
+/* 대화 상자: 뒤를 가우시안 흐림으로 가리고, 상자는 거의 불투명한 유리 */
+.dlg-back { background: rgba(10, 16, 36, .28); -webkit-backdrop-filter: blur(14px) saturate(120%); backdrop-filter: blur(14px) saturate(120%); }
+:root[data-ui="dark"] .dlg-back { background: rgba(2, 5, 14, .45); }
+.dlg { background: rgba(248, 250, 253, .94); border: 1px solid var(--glass-border); border-radius: 26px; box-shadow: 0 24px 60px -18px rgba(20, 28, 56, .45); padding: 24px 22px 16px; }
+:root[data-ui="dark"] .dlg { background: rgba(22, 30, 58, .95); box-shadow: inset 0 1px 0 rgba(255,255,255,.08), 0 28px 70px -20px rgba(0,0,0,.8); }
+.dlg input { border-radius: 14px; background: rgba(20, 28, 56, .05); border-color: var(--line); }
+:root[data-ui="dark"] .dlg input { background: rgba(255,255,255,.06); }
+.dlg .acts button { border-radius: 999px; height: 42px; padding: 0 18px; }
+.dlg .acts button.solid { background: var(--navy-grad); color: var(--on-accent); }
+/* 다중 선택 바: 흐림 처리한 판 위에 버튼 */
+.select-bar { left: 16px; right: 16px; max-width: 488px; margin: 0 auto; bottom: calc(108px + env(safe-area-inset-bottom)); padding: 12px 12px 12px; gap: 10px; border-radius: 28px;
+  background: rgba(246, 248, 252, .9); border: 1px solid var(--glass-border); box-shadow: 0 18px 44px -16px rgba(20, 28, 56, .45);
+  -webkit-backdrop-filter: blur(22px) saturate(150%); backdrop-filter: blur(22px) saturate(150%); }
+:root[data-ui="dark"] .select-bar { background: rgba(18, 26, 52, .9); box-shadow: inset 0 1px 0 rgba(255,255,255,.08), 0 22px 50px -18px rgba(0,0,0,.8); }
+.select-bar .sb-hint { color: var(--ink); text-align: center; padding: 0 4px; }
+.select-bar .sb-row { display: grid; grid-template-columns: 1fr 1fr 1.3fr; gap: 8px; width: 100%; }
+.select-bar .pill-btn { height: 44px; padding: 0 10px; font-size: 14px; box-shadow: none; background: rgba(20, 28, 56, .07); color: var(--ink); }
+:root[data-ui="dark"] .select-bar .pill-btn { background: rgba(255,255,255,.09); color: var(--ink); }
+.select-bar .pill-btn.primary, :root[data-ui="dark"] .select-bar .pill-btn.primary { background: var(--navy-grad); color: var(--on-accent); }
+.select-bar .pill-btn.danger, :root[data-ui="dark"] .select-bar .pill-btn.danger { background: var(--danger); color: #fff; }
+.select-bar .pill-btn:disabled { opacity: .4; }
+body.selecting #recList { padding-bottom: 150px; }
 </style>
 </head>
 <body>
