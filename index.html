@@ -136,14 +136,18 @@ canvas.chart { display: block; width: 100%; height: 150px; touch-action: pan-y; 
 .ic-btn svg { width: 19px; height: 19px; }
 .rc-body { margin-top: 10px; display: flex; align-items: center; gap: 12px; padding-top: 12px; border-top: 1px solid var(--line); }
 .minis { display: flex; gap: 4px; flex: none; }
-.mini { width: 50px; height: 50px; position: relative; display: grid; place-items: center; background: var(--glass-img) center / 100% 100% no-repeat; }
+.mini { width: 56px; height: 56px; position: relative; display: grid; place-items: center; background: var(--glass-img) center / 100% 100% no-repeat; }
 /* 유리 안쪽 타원(세로 4%~96%)으로 잘라서, 범례를 넘어도 원 밖으로 나가지 않게 */
 .mini::before { content: ""; position: absolute; inset: 0; clip-path: ellipse(47.6% 46% at 50% 49.8%);
   background: linear-gradient(to top, var(--c2) 4%, var(--c1) calc(4% + var(--lv) * .92), transparent calc(4% + var(--lv) * .92)); mix-blend-mode: multiply; }
 :root[data-ui="dark"] .mini::before { mix-blend-mode: normal; opacity: .9; }
 .mini::after { content: ""; position: absolute; inset: 0; background: var(--glass-img) center / 100% 100% no-repeat; mix-blend-mode: screen; opacity: .38; }
 :root[data-ui="dark"] .mini::after { opacity: .75; }
-.mini b { position: relative; z-index: 1; font-size: 13px; font-weight: 800; color: #fff; letter-spacing: -.02em; text-shadow: .6px 1px 1.6px rgba(14,20,62,.45); }
+.mini .ms { position: relative; z-index: 1; display: flex; flex-direction: column; align-items: flex-end; line-height: 1; margin-top: 2px; }
+.mini b { font-size: 14px; font-weight: 800; color: #fff; letter-spacing: -.02em; line-height: .95; font-variant-numeric: tabular-nums; text-shadow: .8px 1.2px 2.2px rgba(14,20,62,.7), 0 0 1px rgba(14,20,62,.35); transform: translateX(-2px); }
+.mini i { font-style: normal; font-weight: 100; font-size: 8.5px; color: #fff; margin-top: 1px; letter-spacing: 0; text-shadow: .6px 1px 1.8px rgba(14,20,62,.75), 0 0 1px rgba(14,20,62,.4); transform: translateX(3px); }
+:root:not([data-ui="dark"]) .mini i { text-shadow: .6px 1px 1.6px rgba(14,20,62,.85), 0 0 2.5px rgba(14,20,62,.55); }
+.mini .ms.two b { font-size: 11.5px; line-height: 1; }   /* 모든 게이지: 큰 게이지처럼 숫자는 왼쪽, 단위는 오른쪽으로 살짝 */
 .mini.k-acc { --c1: #6F80D0; --c2: #2338B0; } .mini.k-lat { --c1: #B39AB0; --c2: #8C5573; } .mini.k-spd { --c1: #9E9AC0; --c2: #574383; }
 .rc-line { font-size: 13px; color: var(--ink-2); line-height: 1.45; }
 .tag { font-size: 10.5px; font-weight: 800; padding: 2px 6px; border-radius: 5px; background: var(--surface-2); color: var(--ink-2); margin-left: 6px; vertical-align: 2px; }
