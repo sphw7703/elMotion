@@ -510,11 +510,12 @@ const ctl = {
     this.o = o;
     if (this.vert.length % 4 === 0) this.dirty = true;
   },
-  /** 일시정지: 누르는 즉시 멈추고, 버튼을 누른 충격이 섞이지 않게 0.2초 전까지만 남긴다 */
-  pause() {
+  /** 일시정지: 0.3초 이상 눌렀다 떼면 멈추고, 버튼을 누르기 시작한 때(at)의 0.2초 전까지만 남긴다 */
+  pause(at) {
     if (this.state !== "measure" || this.phase !== "run") return;
     const s0 = this.segs[this.segs.length - 1];
-    const n = Math.max(s0, this.vert.length - CUT), drop = this.vert.length - n;
+    const from = at == null ? this.vert.length : Math.min(at, this.vert.length);
+    const n = Math.max(s0, from - CUT), drop = this.vert.length - n;
     this.vert.length = n; this.lat.length = n;
     for (const k in this.live) this.live[k].splice(Math.max(0, this.live[k].length - drop), drop);
     if (n === s0 && this.segs.length > 1) this.segs.pop();     // 재개하자마자 멈췄으면 빈 구간은 없앤다
@@ -647,29 +648,34 @@ const home = {
       box.innerHTML = `<div class="pause-note glass" id="pNote">${calib ? "센서를 보정하고 있어요.<br>휴대폰을 그대로 두세요."
           : "측정 재개 버튼을 <b>0.3초 이상</b> 길게 눌렀다 떼면<br>0.5초간 센서를 보정하고 바로 이어서 측정해요."}</div>
         <div class="toggle-wrap act-row"><button class="pill-btn primary hold ${calib ? "calib" : ""}" id="bResume" ${calib ? "disabled" : ""}><i class="fill"></i>${ICON.play}<span>${calib ? "보정 중" : "측정 재개"}</span></button>${stop}</div>`;
-      if (!calib) this.bindHold($("#bResume"));
+      if (!calib) this.bindHold($("#bResume"), () => ctl.recalibrate(), () => {
+        const n = $("#pNote"); n.classList.remove("nudge"); void n.offsetWidth; n.classList.add("nudge"); });
     } else {
-      const pause = measuring ? `<button class="pill-btn round" id="bPause" aria-label="일시정지" title="일시정지">${ICON.pause}</button>` : "";
+      const pause = measuring ? `<button class="pill-btn round hold" id="bPause" aria-label="일시정지 (0.3초 이상 길게 누르기)" title="0.3초 이상 길게 눌렀다 떼면 일시정지"><i class="fill"></i>${ICON.pause}</button>` : "";
       box.innerHTML = `<div class="toggle-wrap act-row">${tog}${pause}${stop}${cancel}</div>`;
     }
     if ($("#bTog")) $("#bTog").onclick = () => { this.detail = !this.detail; this.render(); };
-    if ($("#bPause")) $("#bPause").onclick = () => ctl.pause();
+    if ($("#bPause")) {
+      // 누르기 시작한 순간의 위치를 기억해 두었다가, 그 0.2초 전까지만 남긴다
+      let at = null;
+      this.bindHold($("#bPause"), () => ctl.pause(at), () => toast("0.3초 이상 길게 눌렀다 떼 주세요."),
+        () => { at = ctl.vert ? ctl.vert.length : null; });
+    }
     if ($("#bStop")) $("#bStop").onclick = () => ctl.stop("manual");
     if ($("#bCancel")) $("#bCancel").onclick = () => { ctl.state = "idle"; ctl.progress = 0; ctl.stopDemo(); home.render(); };
   },
   /** 길게 누르기: 0.3초가 차오르는 동안 버튼이 채워지고, 다 차면 손을 뗄 때 보정 시작 */
-  bindHold(b) {
+  bindHold(b, onDone, onShort, onDown) {
     let t0 = 0, tm = null;
     const reset = () => { t0 = 0; clearTimeout(tm); b.classList.remove("holding", "ready"); };
     b.addEventListener("pointerdown", e => {
-      e.preventDefault(); t0 = performance.now(); b.classList.add("holding");
+      e.preventDefault(); t0 = performance.now(); b.classList.add("holding"); if (onDown) onDown();
       tm = setTimeout(() => { b.classList.add("ready"); try { navigator.vibrate && navigator.vibrate(15); } catch (er) { /* 무시 */ } }, HOLD_MS);
       try { b.setPointerCapture(e.pointerId); } catch (er) { /* 무시 */ }
     });
     b.addEventListener("pointerup", () => {
       if (!t0) return; const dt = performance.now() - t0; reset();
-      if (dt >= HOLD_MS) ctl.recalibrate();
-      else { const n = $("#pNote"); n.classList.remove("nudge"); void n.offsetWidth; n.classList.add("nudge"); }
+      if (dt >= HOLD_MS) onDone(); else if (onShort) onShort();
     });
     b.addEventListener("pointercancel", reset);
     b.addEventListener("contextmenu", e => e.preventDefault());

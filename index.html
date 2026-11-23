@@ -386,7 +386,7 @@ body.selecting #recList { padding-bottom: 150px; }
 .act-row .pill-btn { white-space: nowrap; }
 .pill-btn.round { width: 46px; padding: 0; flex: none; }
 .pill-btn.round svg { width: 18px; height: 18px; opacity: 1; }
-.pill-btn.hold { min-width: 150px; }
+.pill-btn.hold:not(.round) { min-width: 150px; }
 /* 안내 문구는 버튼 위에 떠 있게 (화면 높이를 밀어내지 않음) */
 .pause-note { position: absolute; left: 50%; translate: -50% 0; bottom: calc(100% + 10px); width: max-content; max-width: calc(100vw - 32px); z-index: 2;
   font-size: 13px; line-height: 1.55; color: var(--ink-2); text-align: center; padding: 11px 18px; border-radius: 18px; }
