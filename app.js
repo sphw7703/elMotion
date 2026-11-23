@@ -1,4 +1,4 @@
-/* 엘모션 · 화면과 동작 */
+/* elMotion · 화면과 동작 */
 "use strict";
 
 /* ───────── 상수 ───────── */
@@ -721,7 +721,7 @@ const records = {
 
 function fileNameOf(rec) {
   const d = new Date(rec.startedAt);
-  const base = (rec.name || "").trim() || `엘모션_${d.getFullYear()}${p2(d.getMonth() + 1)}${p2(d.getDate())}_${p2(d.getHours())}${p2(d.getMinutes())}${p2(d.getSeconds())}`;
+  const base = (rec.name || "").trim() || `elMotion_${d.getFullYear()}${p2(d.getMonth() + 1)}${p2(d.getDate())}_${p2(d.getHours())}${p2(d.getMinutes())}${p2(d.getSeconds())}`;
   return base.replace(/[\\/:*?"<>|]/g, "_") + ".csv";
 }
 let downloads = null;
@@ -1057,7 +1057,7 @@ const installer = {
   init() {
     if (!inPreview() && "serviceWorker" in navigator && window.isSecureContext) navigator.serviceWorker.register("sw.js").catch(() => {});
     window.addEventListener("beforeinstallprompt", e => { e.preventDefault(); this.evt = e; this.render(); });
-    window.addEventListener("appinstalled", () => { this.evt = null; this.render(); toast("엘모션을 설치했어요. 홈 화면에서 열 수 있어요."); });
+    window.addEventListener("appinstalled", () => { this.evt = null; this.render(); toast("elMotion을 설치했어요. 홈 화면에서 열 수 있어요."); });
     $("#btnInstall").onclick = () => this.run();
     this.render();
   },

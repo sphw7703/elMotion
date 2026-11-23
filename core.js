@@ -1,4 +1,4 @@
-/* 엘모션 · 승차감 신호처리 코어
+/* elMotion · 승차감 신호처리 코어
  * 브라우저에서는 window.Core, node에서는 module.exports 로 노출된다.
  * 입력: 가속도 센서 원시값(중력 포함, m/s², 기기 좌표계) → 60 Hz 리샘플
  * 출력: 가감속도, 저크, 상하/좌우 흔들림, 속력, 주행 거리 + ISO 18738 A95 peak-to-peak
@@ -473,7 +473,7 @@
      흔들림(A95): ~8 아주 훌륭, ~10 좋음, ~20 일반적, ~30 좋지 않음, 그 이상 불쾌
      가감속 모양(가감속도+저크+가가가속도): 내부 점수 → 등급(훌륭/좋아요/무난/아쉬워요/점검) + 한마디 평
      속력: ~70 저속, ~130 중속, ~250 고속, ~500 초고속, 그 이상 '초고속의 초월' */
-  const EVAL_VER = 11;
+  const EVAL_VER = 12;
   function accGrade(a) {
     if (a <= 0.4) return { lv: 0, t: "거의 느껴지지 않을 만큼 순해요", s: "순해요" };
     if (a <= 0.7) return { lv: 1, t: "부드러워요", s: "부드러워요" };
@@ -715,7 +715,7 @@
     const vN = normalizeColumn(Array.from(interp(b)), FS);
     let lN = null;
     if (hasE) { const ef = e.map(v => (Number.isNaN(v) ? 0 : v)); lN = normalizeColumn(Array.from(interp(ef)), FS); }
-    // 엘모션에서 내보낸 파일이면 측정 시각 복원
+    // elMotion에서 내보낸 파일이면 측정 시각 복원
     let startedAt = null;
     const r2 = rows[1] || [];
     if (String(r2[0] || "").startsWith("# started_at")) { const d = Date.parse(String(r2[1]).replace(" ", "T")); if (!Number.isNaN(d)) startedAt = d; }

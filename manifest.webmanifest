@@ -1,7 +1,7 @@
 {
   "id": "./",
-  "name": "엘모션",
-  "short_name": "엘모션",
+  "name": "elMotion",
+  "short_name": "elMotion",
   "description": "엘리베이터 승차감 측정",
   "lang": "ko",
   "start_url": "./",
