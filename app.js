@@ -237,7 +237,10 @@ class Chart {
         g.fillStyle = cssVar("--ink"); g.textBaseline = above ? "bottom" : "top";
         g.fillText(label, clamp(px, L + tw / 2 + 2, R - tw / 2 - 2), above ? ty - 3 : ty - 9);
       };
-      mark(hi, true); mark(lo, false);
+      if (o.marks === "peak") {          // 속력: 방향별 최고 속력만 (3 m/min 미만은 표시 안 함)
+        if (v[hi] >= 3) mark(hi, true);
+        if (v[lo] <= -3) mark(lo, false);
+      } else { mark(hi, true); mark(lo, false); }
     }
     // 탭한 지점
     if (this.cursor >= 0 && this.cursor < n && this.prog >= 1) {
@@ -744,9 +747,7 @@ const detail = {
     charts.clear(box);
     box.innerHTML = `<div class="top" id="dHead"><button class="round-btn pop" id="dBack" aria-label="뒤로">${ICON.back}</button>
         <div class="tt"><h2></h2><div></div></div><button class="round-btn pop" id="dEdit" aria-label="이름 변경">${ICON.edit}</button></div>
-      ${this.detail
-        ? `<div class="ai-box glass fade-in"><span class="ai-chip">${ICON.star}AI 평가</span><p>${esc(ev.overall)}</p></div>`
-        : `<div class="overall fade-in">${esc(ev.overall)}</div>`}
+      <div class="ai-box glass fade-in"><span class="ai-chip">${ICON.star}AI 평가</span><p>${esc(ev.overall)}</p></div>
       <div id="dBody"></div>
       <div class="toggle-wrap"><button class="pill-btn ${this.detail ? "up" : ""}" id="dTog">${ICON.chev}${this.detail ? "접을래요" : "자세히 볼래요"}</button></div>`;
     this.renderHead();
@@ -798,7 +799,7 @@ const detail = {
         <div class="e ${c.e2 ? "two" : ""} ${c.lv >= 0 ? "lv" + c.lv : ""}">${c.e2 ? c.e2.map(x => `<span>${esc(x)}</span>`).join("") : esc(c.e)}</div></div>`).join("")}</div>
       <div class="charts">${series.map((s, i) => `<div class="chart-card glass fade-in" style="animation-delay:${0.1 + i * 0.08}s">
         <div class="h"><b>${s.title}</b><span>${s.unit}</span><em>${esc(comment[s.key] || "")}</em></div><canvas class="chart" id="dc-${s.key}" style="height:180px"></canvas></div>`).join("")}</div>`;
-    series.forEach(s => new Chart($(`#dc-${s.key}`), { values: S[s.key], rate: r.rate, color: s.color, half: s.half, dec: s.dec, unit: s.unit, animate: true, tap: true, marks: true }));
+    series.forEach(s => new Chart($(`#dc-${s.key}`), { values: S[s.key], rate: r.rate, color: s.color, half: s.half, dec: s.dec, unit: s.unit, animate: true, tap: true, marks: s.key === "speed" ? "peak" : true }));
   },
 };
 
