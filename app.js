@@ -72,7 +72,7 @@ const theme = {
   apply() {
     const r = this.resolved();
     document.documentElement.dataset.ui = r;
-    const m = document.querySelector('meta[name="theme-color"]'); if (m) m.content = r === "dark" ? "#0F131B" : "#D8E0EC";
+    const m = document.querySelector('meta[name="theme-color"]'); if (m) m.content = r === "dark" ? "#080D1D" : "#E9EDF5";
     document.querySelectorAll("#themeOpts .theme-opt").forEach(b => b.classList.toggle("on", b.dataset.theme === this.pref));
     charts.redrawAll();
   },

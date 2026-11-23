@@ -559,7 +559,7 @@
     const vL = m.vibL ? vibGrade(m.vibL.a95) : null;
     const dirs = m.speedUp > 3 && m.speedDown > 3 ? "상승·하강" : m.speedUp > 3 ? "상승" : m.speedDown > 3 ? "하강" : "";
     const sg = speedGrade(m.speedMax);
-    const speed = { lv: 0, t: sg.t + (dirs && m.speedMax >= 3 && m.speedMax <= 500 ? ` · ${dirs}` : ""), s: sg.s };
+    const speed = { lv: 0, t: sg.t, s: sg.s };
     const accS = a => (a <= 0.4 ? "순하고" : a <= 0.7 ? "부드럽고" : a <= 1.3 ? "강하고" : "거칠고");
     const gA = accGrade(m.accMax).s, gD = accGrade(m.decMax).s;
     acc.detail = `가속은 ${accS(m.accMax)} 감속${gA === gD ? "도" : "은"} ${gD}`;
