@@ -337,12 +337,15 @@ body { background: var(--page-bg); background-attachment: fixed; }
 .select-bar { background: transparent; border-top: 0; }
 /* 떠 있는 하단 탭 + 가운데 원형 측정 버튼 */
 .nav { margin: 0 16px calc(12px + env(safe-area-inset-bottom)); height: 70px; padding-bottom: 0; border-radius: 35px; overflow: visible; }
-.nav button { width: 64px; height: 64px; }
-.nav button.mid { width: 66px; height: 66px; margin-top: -26px; border-radius: 50%; background: var(--navy-grad); gap: 0;
-  box-shadow: 0 0 0 5px var(--bg), 0 14px 28px -8px rgba(27,42,99,.6); }
-:root[data-ui="dark"] .nav button.mid { box-shadow: 0 0 0 5px #0A1022, 0 0 28px -2px rgba(91,140,255,.65); }
-.nav button.mid::after { display: none; }
-.nav button.mid img { width: 44px; height: 44px; filter: none; opacity: 1; }
+.nav button { width: 64px; height: 64px; z-index: 1; }
+.nav button::after { display: none; }
+/* 선택한 탭 아래로 미끄러지는 원. 아이콘은 원과 함께 떠오르고, 색·크기 변화는 그대로 */
+.nav-orb { position: absolute; left: 0; top: -19px; width: 66px; height: 66px; border-radius: 50%; background: var(--navy-grad); pointer-events: none; z-index: 0;
+  box-shadow: 0 0 0 5px var(--bg), 0 14px 28px -8px rgba(27,42,99,.6); opacity: 0; }
+.nav-orb.ready { opacity: 1; transition: transform .5s cubic-bezier(.3,1.25,.45,1), opacity .2s; }
+:root[data-ui="dark"] .nav-orb { box-shadow: 0 0 0 5px #0A1022, 0 0 28px -2px rgba(91,140,255,.65); }
+.nav button img { transition: filter .3s, opacity .3s, transform .5s cubic-bezier(.3,1.25,.45,1); }
+.nav button.on img { transform: translateY(-21px) scale(1.06); }
 .toast { color: var(--ink); border-radius: 999px; padding: 12px 20px; background: rgba(255,255,255,.88); border: 1px solid var(--glass-border); box-shadow: var(--glass-shadow);
   -webkit-backdrop-filter: blur(18px); backdrop-filter: blur(18px); }
 :root[data-ui="dark"] .toast { background: rgba(28, 38, 72, .88); color: #fff; }
@@ -432,6 +435,7 @@ body.selecting #recList { padding-bottom: 150px; }
   </div>
 
   <nav class="nav glass" aria-label="화면 이동">
+    <span class="nav-orb" id="navOrb" aria-hidden="true"></span>
     <button id="navRecords" class="pop" aria-label="기록 관리"><img src="assets/ic-records.png" alt=""></button>
     <button id="navHome" class="mid pop" aria-label="측정"><img src="assets/ic-measure.png" alt=""></button>
     <button id="navSettings" class="pop" aria-label="설정"><img src="assets/ic-settings.png" alt=""></button>

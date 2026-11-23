@@ -1007,11 +1007,18 @@ const nav = {
     if (this.top === "") this.push(target); else this.replace(target);
     this.showPage(i);
   },
+  /** 하단 탭의 원: 선택한 탭 아래로 미끄러져 이동 */
+  moveOrb() {
+    const orb = $("#navOrb"), b = $(["#navRecords", "#navHome", "#navSettings"][this.page]);
+    if (!orb || !b) return;
+    orb.style.transform = `translateX(${b.offsetLeft + b.offsetWidth / 2 - orb.offsetWidth / 2}px)`;
+  },
   place() { $("#pager").style.transform = `translateX(${-this.page * 33.3334}%)`; },
   showPage(i) {
     const changed = i !== this.page;
     this.page = i; this.place();
     ["#navRecords", "#navHome", "#navSettings"].forEach((s, k) => $(s).classList.toggle("on", k === i));
+    this.moveOrb();
     if (changed) {
       stagger($(["#pRecords", "#pHome", "#pSettings"][i]));
       if (i === 0) records.render();
@@ -1074,6 +1081,8 @@ const installer = {
   stagger($(".nav")); stagger($("#pHome"));
   installer.init();
   $("#btnImport").onclick = () => $("#fileIn").click();
+  addEventListener("resize", () => nav.moveOrb());
+  requestAnimationFrame(() => { $("#navOrb").classList.add("ready"); nav.moveOrb(); });
   $("#fileIn").onchange = e => { const f = [...e.target.files]; e.target.value = ""; records.importFiles(f); };
   $("#btnExport").onclick = () => (records.selecting ? nav.back() : records.startSelect("export"));
   $("#btnDelete").onclick = () => (records.selecting ? nav.back() : records.startSelect("delete"));
