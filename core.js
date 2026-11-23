@@ -254,28 +254,41 @@
   }
 
   /* ───────── 전체 분석 (저장된 원시 데이터 → 모든 지표) ───────── */
-  function analyze(vert, lat, fs = FS) {
+  /** segs: 일시정지로 나뉜 구간의 시작 인덱스들 ([0, i1, i2 …]). 구간마다 따로 분석해서 잇는다. */
+  function segBounds(n, segs) {
+    const st = [0];
+    if (segs) for (const s of segs) if (s > st[st.length - 1] && s < n) st.push(s);
+    return st.map((s, k) => [s, k + 1 < st.length ? st[k + 1] : n]);
+  }
+  function analyze(vert, lat, fs = FS, segs) {
     const n = vert.length, hasLat = !!lat;
+    const bounds = segBounds(n, segs);
     const S = {
       acc: new Float32Array(n), jerk: new Float32Array(n), vibV: new Float32Array(n),
       vibL: new Float32Array(n), speed: new Float32Array(n), dist: new Float32Array(n),
     };
     const mot = new Float32Array(n), moving = new Uint8Array(n);
-    const an = new RideAnalyzer(fs);
-    for (let i = 0; i < n; i++) {
-      const o = an.push(vert[i], hasLat ? lat[i] : NaN);
-      S.acc[i] = o.acc; S.jerk[i] = o.jerk; S.vibV[i] = o.vibV; S.vibL[i] = hasLat ? o.vibL : NaN;
-      S.speed[i] = o.speed; S.dist[i] = o.dist; mot[i] = o.mot; moving[i] = o.moving ? 1 : 0;
+    let distOff = 0;
+    for (const [s, e] of bounds) {
+      const an = new RideAnalyzer(fs);          // 구간마다 필터·속력 적분을 새로 시작
+      for (let i = s; i < e; i++) {
+        const o = an.push(vert[i], hasLat ? lat[i] : NaN);
+        S.acc[i] = o.acc; S.jerk[i] = o.jerk; S.vibV[i] = o.vibV; S.vibL[i] = hasLat ? o.vibL : NaN;
+        S.speed[i] = o.speed; S.dist[i] = distOff + o.dist; mot[i] = o.mot; moving[i] = o.moving ? 1 : 0;
+      }
+      if (e > s) distOff = S.dist[e - 1];
     }
 
-    // 운행 구간 (경계 0~3 근사): moving 구간 + 앞뒤 0.5초
+    // 운행 구간 (경계 0~3 근사): moving 구간 + 앞뒤 0.5초 (일시정지 경계는 넘지 않음)
     const pad = Math.round(0.5 * fs);
     const trips = [];
-    for (let i = 0; i < n;) {
-      if (!moving[i]) { i++; continue; }
-      let j = i; while (j < n && moving[j]) j++;
-      trips.push([Math.max(0, i - pad), Math.min(n - 1, j - 1 + pad)]);
-      i = j;
+    for (const [s, e] of bounds) {
+      for (let i = s; i < e;) {
+        if (!moving[i]) { i++; continue; }
+        let j = i; while (j < e && moving[j]) j++;
+        trips.push([Math.max(s, i - pad), Math.min(e - 1, j - 1 + pad)]);
+        i = j;
+      }
     }
     const tripMask = new Uint8Array(n);
     for (const [a, b] of trips) for (let k = a; k <= b; k++) tripMask[k] = 1;
@@ -296,7 +309,8 @@
       if (s0 >= 0 && s1 - s0 - 2 * m >= fs) { cruise.push([s0 + m, s1 - m]); for (let k = s0 + m; k <= s1 - m; k++) cruiseMask[k] = 1; }
     }
     const all = new Uint8Array(n).fill(1);
-    const vMask = cruise.length ? cruiseMask : constCount >= fs ? constMask : (trips.length ? tripMask : all);
+    const vMask = Uint8Array.from(cruise.length ? cruiseMask : constCount >= fs ? constMask : (trips.length ? tripMask : all));
+    for (const [s] of bounds) if (s > 0) vMask[s] = 0;   // 일시정지 경계에서 p-p를 끊는다
     const lMask = vMask;
 
     const vibV = ppStats(S.vibV, vMask, fs);
@@ -318,8 +332,9 @@
       accMax, decMax, accPeak: Math.max(accMax, decMax),
       jerkMax, vibV, vibL, speedUp: up, speedDown: down, speedMax: Math.max(up, down),
       distance: n ? S.dist[n - 1] : 0, cruise: cruise.map(([a, b]) => [a / fs, b / fs]),
+      pauses: bounds.slice(1).map(([s]) => s / fs),
     };
-    m.ride = rideShape(vert, trips, fs);
+    m.ride = rideShape(vert, trips, fs, bounds);
     m.eval = evaluate(m);
     return { series: S, m };
   }
@@ -452,12 +467,13 @@
     return { score: Math.max(0, Math.round(100 - p)), bad, ch, jolt };
   }
 
-  function rideShape(vert, trips, fs) {
+  function rideShape(vert, trips, fs, bounds) {
     if (!trips.length) return null;
     const med = percentile(Array.from(vert), .5);
     let worst = null;
     for (const [a, b] of trips) {
-      const lo = Math.max(0, a - Math.round(1.5 * fs)), hi = Math.min(vert.length, b + Math.round(1.5 * fs));
+      const sg = (bounds || [[0, vert.length]]).find(([s, e]) => a >= s && a < e) || [0, vert.length];
+      const lo = Math.max(sg[0], a - Math.round(1.5 * fs)), hi = Math.min(sg[1], b + Math.round(1.5 * fs));
       const seg = Float64Array.from(vert.subarray ? vert.subarray(lo, hi) : vert.slice(lo, hi), q => q - med);
       const r = shapeOne(seg, fs); if (!r) continue;
       const jd = judgeOne(r); jd.dir = r.dir; jd._r = r;
@@ -473,7 +489,7 @@
      흔들림(A95): ~8 아주 훌륭, ~10 좋음, ~20 일반적, ~30 좋지 않음, 그 이상 불쾌
      가감속 모양(가감속도+저크+가가가속도): 내부 점수 → 등급(훌륭/좋아요/무난/아쉬워요/점검) + 한마디 평
      속력: ~70 저속, ~130 중속, ~250 고속, ~500 초고속, 그 이상 '초고속의 초월' */
-  const EVAL_VER = 13;
+  const EVAL_VER = 14;
   function accGrade(a) {
     if (a <= 0.4) return { lv: 0, t: "거의 느껴지지 않을 만큼 순해요", s: "순해요" };
     if (a <= 0.7) return { lv: 1, t: "부드러워요", s: "부드러워요" };
@@ -678,14 +694,16 @@
   /** CSV → {vert, lat|null, rate, startedAt?, info}. A4~: 시간, B4~: 수직, E4~: 수평 */
   function importCsv(text) {
     const rows = parseCsv(text);
-    const t = [], b = [], e = [];
+    const t = [], b = [], e = [], sg = [];
     let hasE = false;
+    // elMotion에서 내보낸 파일의 일시정지 구간 번호 (segment 열)
+    const segCol = (rows[2] || []).findIndex(c => String(c).trim() === "segment");
     for (let r = 3; r < rows.length; r++) {
       const row = rows[r];
       const tv = num(row[0]), bv = num(row[1]);
       if (Number.isNaN(tv) || Number.isNaN(bv)) continue;
       const ev = num(row[4]);
-      t.push(tv); b.push(bv); e.push(ev);
+      t.push(tv); b.push(bv); e.push(ev); if (segCol >= 0) sg.push(num(row[segCol]));
       if (!Number.isNaN(ev)) hasE = true;
     }
     if (b.length < 10) throw new Error("A4·B4 아래에 숫자 데이터가 부족해요");
@@ -719,7 +737,13 @@
     let startedAt = null;
     const r2 = rows[1] || [];
     if (String(r2[0] || "").startsWith("# started_at")) { const d = Date.parse(String(r2[1]).replace(" ", "T")); if (!Number.isNaN(d)) startedAt = d; }
-    return { vert: vN.data, lat: lN ? lN.data : null, rate: FS, startedAt, info: { srcRate, vertUnit: vN.unit, latUnit: lN ? lN.unit : null } };
+    let segs = null;
+    if (sg.length) {
+      const st = [0];
+      for (let k = 1; k < sg.length; k++) if (sg[k] !== sg[k - 1] && !Number.isNaN(sg[k])) st.push(Math.round(ts[k] * FS));
+      if (st.length > 1) segs = st;
+    }
+    return { vert: vN.data, lat: lN ? lN.data : null, rate: FS, startedAt, segs, info: { srcRate, vertUnit: vN.unit, latUnit: lN ? lN.unit : null } };
   }
 
   function exportCsv(rec, A) {
@@ -729,11 +753,12 @@
     const lines = [
       `# name,"${(rec.name || "").replace(/"/g, '""')}"`,
       `# started_at,${when},sample_rate_hz,${rec.rate}`,
-      "time_s,vertical_accel_m_s2,accel_m_s2,jerk_m_s3,lateral_accel_m_s2,vertical_vib_gal,lateral_vib_gal,speed_m_min,distance_m",
+      "time_s,vertical_accel_m_s2,accel_m_s2,jerk_m_s3,lateral_accel_m_s2,vertical_vib_gal,lateral_vib_gal,speed_m_min,distance_m,segment",
     ];
-    for (let i = 0; i < n; i++) {
+    const bd = segBounds(n, rec.segs);
+    for (let k = 0; k < bd.length; k++) for (let i = bd[k][0]; i < bd[k][1]; i++) {
       lines.push([(i / rec.rate).toFixed(4), f(rec.vert[i]), f(S.acc[i]), f(S.jerk[i]),
-        rec.lat ? f(rec.lat[i]) : "", f(S.vibV[i], 2), rec.lat ? f(S.vibL[i], 2) : "", f(S.speed[i], 2), f(S.dist[i], 3)].join(","));
+        rec.lat ? f(rec.lat[i]) : "", f(S.vibV[i], 2), rec.lat ? f(S.vibL[i], 2) : "", f(S.speed[i], 2), f(S.dist[i], 3), k + 1].join(","));
     }
     return lines.join("\n") + "\n";
   }
@@ -799,7 +824,7 @@
 
   const Core = {
     FS, P, Biquad, Resampler, StabilityDetector, Calibration, AbnormalDetector, PeakToPeak, RideAnalyzer,
-    analyze, evaluate, rideShape, _dbg: { zp, grad, peaks }, fuseBaro, EVAL_VER, ppStats, percentile, parseCsv, importCsv, exportCsv, DemoSignal,
+    analyze, segBounds, evaluate, rideShape, _dbg: { zp, grad, peaks }, fuseBaro, EVAL_VER, ppStats, percentile, parseCsv, importCsv, exportCsv, DemoSignal,
   };
   if (typeof module !== "undefined" && module.exports) module.exports = Core;
   else root.Core = Core;

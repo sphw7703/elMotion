@@ -6,6 +6,8 @@ const FS = Core.FS;
 const LEGEND = { acc: 1.5, lat: 30, spd: 600 };        // 물 높이 범례 (화면에 표시하지 않음)
 const CUT = Math.round(Core.P.CUT_SEC * FS);
 const CUT_MANUAL = Math.round(0.3 * FS);   // 수동 모드 종료 시 버려지는 마지막 0.3초
+const HOLD_MS = 300;                       // 측정 재개: 이만큼 길게 눌러야 한다
+const RECAL_N = Math.round(0.5 * FS);      // 재개 전 센서 보정 0.5초
 const LIVE_WIN = FS * 10;
 
 /* ───────── 공통 도구 ───────── */
@@ -26,6 +28,7 @@ const ICON = {
   stop: '<svg viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2.5"/></svg>',
   star: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2.5c.6 4.6 2.9 6.9 7.5 7.5v.1c-4.6.6-6.9 2.9-7.5 7.5h-.1c-.6-4.6-2.9-6.9-7.5-7.5V10c4.6-.6 6.9-2.9 7.5-7.5z"/></svg>',
   play: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5.5v13a1 1 0 001.5.9l10.4-6.5a1 1 0 000-1.8L9.5 4.6A1 1 0 008 5.5z"/></svg>',
+  pause: '<svg viewBox="0 0 24 24" fill="currentColor"><rect x="6.5" y="5" width="4" height="14" rx="1.4"/><rect x="13.5" y="5" width="4" height="14" rx="1.4"/></svg>',
 };
 
 const prefs = {
@@ -226,6 +229,17 @@ class Chart {
     g.fillStyle = grad; g.fill(area);
     g.strokeStyle = o.color; g.lineWidth = 1.8; g.lineJoin = "round"; g.stroke(path);
     g.restore();
+    // 일시정지 지점: 점선 + 작은 일시정지 표시
+    if (o.pauses && o.pauses.length) {
+      const c3 = cssVar("--ink-3");
+      for (const t of o.pauses) {
+        const i = Math.round((t - off) * rate); if (i < 0 || i > span) continue;
+        const px = Math.round(x(i)) + .5;
+        g.strokeStyle = c3; g.lineWidth = 1; g.globalAlpha = .9; g.setLineDash([2, 3]);
+        g.beginPath(); g.moveTo(px, T + 12); g.lineTo(px, B); g.stroke(); g.setLineDash([]);
+        g.fillStyle = c3; g.fillRect(px - 4, T, 3, 9); g.fillRect(px + 1, T, 3, 9); g.globalAlpha = 1;
+      }
+    }
     // 끝점 강조 (실시간)
     if (o.window && n) { const px = x(n - 1), py = y(v[n - 1]); g.fillStyle = o.color; g.beginPath(); g.arc(px, py, 3.5, 0, 7); g.fill(); }
     // 최고·최저 표시 (기록 그래프): 점 + 세로 지시선 + 값
@@ -292,24 +306,27 @@ const baro = {
   get supported() { return typeof window.PressureSensor === "function"; },
   get on() { return this.supported && prefs.get("baro", "on") === "on"; },
   start(t0) {
-    this.samples = []; this.t0 = t0;
+    this.samples = []; this.t0 = t0; this.paused = false; this.recSec = 0;
     if (!this.on) return;
     try {
       this.sensor = new window.PressureSensor({ frequency: 25 });
-      this.sensor.onreading = () => this.samples.push({ t: (performance.now() - this.t0) / 1000, p: this.sensor.pressure });
+      this.sensor.onreading = () => !this.paused && this.samples.push({ t: (performance.now() - this.t0) / 1000, p: this.sensor.pressure });
       this.sensor.start();
     } catch (e) { this.sensor = null; }
   },
   stop() { try { this.sensor && this.sensor.stop(); } catch (e) { /* 무시 */ } this.sensor = null; return this.samples && this.samples.length > 4 ? this.samples : null; },
+  // 일시정지: 기록된 시간(recSec)까지만 남기고, 재개하면 그 시각부터 이어서 센다
+  pause(recSec) { this.paused = true; if (this.samples) this.samples = this.samples.filter(b => b.t <= recSec); this.recSec = recSec; },
+  resume() { this.paused = false; this.t0 = performance.now() - (this.recSec || 0) * 1000; },
 };
 function analysisOf(rec) {
   const useBaro = !!(rec.baro && rec.baro.length > 4 && prefs.get("baro", "on") === "on");
-  const k = rec.id + ":" + rec.vert.length + ":" + (useBaro ? 1 : 0);
+  const k = rec.id + ":" + rec.vert.length + ":" + (useBaro ? 1 : 0) + ":" + (rec.segs ? rec.segs.join(".") : "");
   if (!cache.has(k)) {
-    const A = Core.analyze(rec.vert, rec.lat, rec.rate);
+    const A = Core.analyze(rec.vert, rec.lat, rec.rate, rec.segs);
     if (useBaro) {
-      // 기압계 보정은 속력과 주행 거리에만
-      const f = Core.fuseBaro(A.series.speed, rec.rate, rec.baro);
+      // 기압계 보정은 속력과 주행 거리에만 (일시정지 구간마다 따로)
+      const f = fuseSegs(A.series.speed, rec);
       if (f) {
         A.series.speed = f.speed; A.series.dist = f.dist;
         let up = 0, down = 0; for (const v of f.speed) { if (v > up) up = v; if (-v > down) down = -v; }
@@ -320,6 +337,20 @@ function analysisOf(rec) {
     cache.set(k, A);
   }
   return cache.get(k);
+}
+function fuseSegs(speed, rec) {
+  const r = rec.rate, bd = Core.segBounds(speed.length, rec.segs);
+  if (bd.length < 2) return Core.fuseBaro(speed, r, rec.baro);
+  const out = new Float32Array(speed.length), dist = new Float32Array(speed.length);
+  let d = 0, any = false;
+  for (const [a, b] of bd) {
+    const sp = speed.subarray(a, b);
+    const bs = rec.baro.filter(x => x.t >= a / r && x.t < b / r).map(x => ({ t: x.t - a / r, p: x.p }));
+    const f = Core.fuseBaro(sp, r, bs); if (f) any = true;
+    const v = f ? f.speed : sp;
+    for (let i = 0; i < v.length; i++) { out[a + i] = v[i]; d += Math.abs(v[i]) / 60 / r; dist[a + i] = d; }
+  }
+  return any ? { speed: out, dist } : null;
 }
 /** 목록 한줄평: 맨 앞 한 문장만 ("우당탕탕!"은 다음 문장과 함께) */
 function firstSentence(t) {
@@ -391,6 +422,7 @@ const inPreview = () => !!(window.claude && window.claude.use);
    ════════════════════════════════════════════════════════════════ */
 const ctl = {
   state: "idle",          // idle | wait(수동: 안정 기다림) | measure
+  phase: "run",           // measure 안에서: run | pause(일시정지) | calib(재개 전 0.5초 보정)
   sensorOk: null, needPermission: false, gotEvent: false, demo: null,
   progress: 0, needDisturb: false, dirty: true, wake: null,
   get mode() { return prefs.get("mode", "auto"); },
@@ -443,7 +475,11 @@ const ctl = {
     return this.mode === "auto" && this.state === "idle" && !this.needDisturb && nav.page === 1 && !nav.overlay;
   },
   on60(x, y, z) {
-    if (this.state === "measure") return this.onMeasure(x, y, z);
+    if (this.state === "measure") {
+      if (this.phase === "run") return this.onMeasure(x, y, z);
+      if (this.phase === "calib") return this.onRecal(x, y, z);
+      return;                                    // 일시정지 중에는 기록하지 않음
+    }
     const jumps = this.stab.jumps;
     const r = this.stab.push(x, y, z);
     if (this.stab.jumps !== jumps) this.needDisturb = false;     // 한 번 움직였으면 다시 자동 시작 가능
@@ -452,7 +488,8 @@ const ctl = {
     if (this.armed && r.cal) this.begin(r.cal);
   },
   begin(cal) {
-    this.state = "measure"; this.cal = cal; this.progress = 0;
+    this.state = "measure"; this.phase = "run"; this.cal = cal; this.progress = 0;
+    this.segs = [0]; this.distOff = 0;
     this.abn = this.mode === "auto" ? new Core.AbnormalDetector(cal, FS) : null;
     this.an = new Core.RideAnalyzer(FS);
     this.vert = []; this.lat = [];
@@ -473,21 +510,64 @@ const ctl = {
     this.o = o;
     if (this.vert.length % 4 === 0) this.dirty = true;
   },
+  /** 일시정지: 누르는 즉시 멈추고, 버튼을 누른 충격이 섞이지 않게 0.2초 전까지만 남긴다 */
+  pause() {
+    if (this.state !== "measure" || this.phase !== "run") return;
+    const s0 = this.segs[this.segs.length - 1];
+    const n = Math.max(s0, this.vert.length - CUT), drop = this.vert.length - n;
+    this.vert.length = n; this.lat.length = n;
+    for (const k in this.live) this.live[k].splice(Math.max(0, this.live[k].length - drop), drop);
+    if (n === s0 && this.segs.length > 1) this.segs.pop();     // 재개하자마자 멈췄으면 빈 구간은 없앤다
+    this.phase = "pause";
+    baro.pause(n / FS);
+    this.unlockScreen();
+    try { navigator.vibrate && navigator.vibrate(30); } catch (e) { /* 무시 */ }
+    home.render();
+  },
+  /** 측정 재개 버튼을 0.3초 이상 눌렀다 떼면: 0.5초 센서 보정 → 바로 재개 */
+  recalibrate() {
+    if (this.state !== "measure" || this.phase !== "pause") return;
+    this.phase = "calib"; this.rb = []; this.recalP = 0;
+    this.lockScreen();
+    home.render();
+  },
+  onRecal(x, y, z) {
+    const b = this.rb; b.push([x, y, z]);
+    if (b.length >= 3) {     // 크게 움직이면(손에 든 상태) 보정을 처음부터
+      const m0 = b[0], d = Math.hypot(x - m0[0], y - m0[1], z - m0[2]);
+      if (d > Core.P.STABLE_JUMP * 3) { this.rb = [[x, y, z]]; }
+    }
+    this.recalP = this.rb.length / RECAL_N; this.dirty = true;
+    if (this.rb.length < RECAL_N) return;
+    const m = [0, 0, 0]; for (const p of this.rb) for (let i = 0; i < 3; i++) m[i] += p[i] / this.rb.length;
+    this.cal = new Core.Calibration(m[0], m[1], m[2]);
+    this.abn = this.mode === "auto" ? new Core.AbnormalDetector(this.cal, FS) : null;
+    this.distOff += this.o ? this.o.dist : 0;
+    this.an = new Core.RideAnalyzer(FS); this.o = null;
+    if (this.vert.length > this.segs[this.segs.length - 1]) this.segs.push(this.vert.length);
+    this.phase = "run"; this.rb = null;
+    baro.resume();
+    home.render();
+  },
   async stop(reason) {
     if (this.state !== "measure") { this.state = "idle"; this.progress = 0; home.render(); return; }
-    this.state = "idle"; this.needDisturb = true; this.progress = 0;
+    const wasRun = this.phase === "run";
+    this.state = "idle"; this.phase = "run"; this.needDisturb = true; this.progress = 0;
     this.unlockScreen();
     const baroSamples = baro.stop();
     const demo = !!this.demo; this.stopDemo();
     // 비정상 흔들림: 감지 0.2초 전까지 / 수동 모드에서 버튼으로 끝낼 때: 버튼을 누르며 생긴 흔들림을 빼려고 0.3초 전까지
-    const cut = reason === "abnormal" ? CUT : this.mode === "manual" ? CUT_MANUAL : 0;
+    // 일시정지 중에 끝내면 이미 잘라 두었으니 더 자르지 않는다
+    const cut = !wasRun ? 0 : reason === "abnormal" ? CUT : this.mode === "manual" ? CUT_MANUAL : 0;
     const n = Math.max(0, this.vert.length - cut);
+    const segs = this.segs.filter(s => s < n);
     home.render();
     if (n < FS) { toast("측정 시간이 너무 짧아 저장하지 않았어요."); return; }
     if (reason === "abnormal") { toast("비정상적인 흔들림이 감지되어 측정을 종료했어요.", 4200); try { navigator.vibrate && navigator.vibrate(60); } catch (e) { /* 무시 */ } }
     const rec = { id: "ride_" + this.startedAt, name: demo ? "데모 측정" : "", startedAt: this.startedAt, rate: FS, demo,
       vert: Float32Array.from(this.vert.slice(0, n)), lat: Float32Array.from(this.lat.slice(0, n)), updatedAt: Date.now(),
       baro: baroSamples ? baroSamples.filter(b => b.t <= n / FS) : null };
+    if (segs.length > 1) rec.segs = segs;
     try { await store.put(rec); } catch (e) { toast("기록을 저장하지 못했어요."); }
     records.render();
     detail.open(rec, "home");
@@ -505,7 +585,10 @@ const home = {
     const st = ctl.state, measuring = st === "measure";
     const want = measuring ? (this.detail ? "live-detail" : "live-simple") : "single";
     $("#livePill").hidden = !measuring;
+    const held = measuring && ctl.phase !== "run";
+    $("#livePill").classList.toggle("paused", held);
     if (want !== this.layout) { this.layout = want; this.build(want); }
+    $("#homeBody").classList.toggle("paused", held);
     this.updateSingle();
     this.renderActions();
     ctl.dirty = true;
@@ -552,22 +635,52 @@ const home = {
     }
   },
   renderActions() {
-    const measuring = ctl.state === "measure";
-    const k = `${measuring}|${this.detail}|${ctl.mode}`;
+    const measuring = ctl.state === "measure", ph = measuring ? ctl.phase : "";
+    const k = `${measuring}|${this.detail}|${ctl.mode}|${ph}`;
     const box = $("#homeActions"); if (box.dataset.k === k) return; box.dataset.k = k;
     const tog = `<button class="pill-btn ${this.detail ? "up" : ""}" id="bTog">${ICON.chev}${this.detail ? "접을래요" : "자세히 볼래요"}</button>`;
     const stop = measuring ? `<button class="pill-btn danger" id="bStop">${ICON.stop}${ctl.mode === "auto" ? "즉시 정지" : "측정 종료"}</button>` : "";
     const cancel = !measuring && ctl.state === "wait" ? `<button class="pill-btn" id="bCancel">취소</button>` : "";
-    box.innerHTML = `<div class="toggle-wrap" style="margin:0;gap:10px;display:flex">${tog}${stop}${cancel}</div>`;
-    $("#bTog").onclick = () => { this.detail = !this.detail; this.render(); };
+    if (measuring && ph !== "run") {
+      // 일시정지 → 측정 재개 (0.3초 이상 길게 눌렀다 떼기)
+      const calib = ph === "calib";
+      box.innerHTML = `<div class="pause-note glass" id="pNote">${calib ? "센서를 보정하고 있어요.<br>휴대폰을 그대로 두세요."
+          : "측정 재개 버튼을 <b>0.3초 이상</b> 길게 눌렀다 떼면<br>0.5초간 센서를 보정하고 바로 이어서 측정해요."}</div>
+        <div class="toggle-wrap act-row"><button class="pill-btn primary hold ${calib ? "calib" : ""}" id="bResume" ${calib ? "disabled" : ""}><i class="fill"></i>${ICON.play}<span>${calib ? "보정 중" : "측정 재개"}</span></button>${stop}</div>`;
+      if (!calib) this.bindHold($("#bResume"));
+    } else {
+      const pause = measuring ? `<button class="pill-btn round" id="bPause" aria-label="일시정지" title="일시정지">${ICON.pause}</button>` : "";
+      box.innerHTML = `<div class="toggle-wrap act-row">${tog}${pause}${stop}${cancel}</div>`;
+    }
+    if ($("#bTog")) $("#bTog").onclick = () => { this.detail = !this.detail; this.render(); };
+    if ($("#bPause")) $("#bPause").onclick = () => ctl.pause();
     if ($("#bStop")) $("#bStop").onclick = () => ctl.stop("manual");
     if ($("#bCancel")) $("#bCancel").onclick = () => { ctl.state = "idle"; ctl.progress = 0; ctl.stopDemo(); home.render(); };
+  },
+  /** 길게 누르기: 0.3초가 차오르는 동안 버튼이 채워지고, 다 차면 손을 뗄 때 보정 시작 */
+  bindHold(b) {
+    let t0 = 0, tm = null;
+    const reset = () => { t0 = 0; clearTimeout(tm); b.classList.remove("holding", "ready"); };
+    b.addEventListener("pointerdown", e => {
+      e.preventDefault(); t0 = performance.now(); b.classList.add("holding");
+      tm = setTimeout(() => { b.classList.add("ready"); try { navigator.vibrate && navigator.vibrate(15); } catch (er) { /* 무시 */ } }, HOLD_MS);
+      try { b.setPointerCapture(e.pointerId); } catch (er) { /* 무시 */ }
+    });
+    b.addEventListener("pointerup", () => {
+      if (!t0) return; const dt = performance.now() - t0; reset();
+      if (dt >= HOLD_MS) ctl.recalibrate();
+      else { const n = $("#pNote"); n.classList.remove("nudge"); void n.offsetWidth; n.classList.add("nudge"); }
+    });
+    b.addEventListener("pointercancel", reset);
+    b.addEventListener("contextmenu", e => e.preventDefault());
   },
   tick() {
     if (!ctl.dirty) return; ctl.dirty = false;
     if (ctl.state !== "measure") { if (this.big) { this.big.level(ctl.progress); this.updateSingle(); } return; }
     const o = ctl.o, sec = ctl.vert.length / FS;
-    $("#liveTime").textContent = `측정 중 ${Math.floor(sec / 60)}:${p2(Math.floor(sec % 60))}`;
+    const lbl = ctl.phase === "pause" ? "일시정지" : ctl.phase === "calib" ? "보정 중" : "측정 중";
+    $("#liveTime").textContent = `${lbl} ${Math.floor(sec / 60)}:${p2(Math.floor(sec % 60))}`;
+    if (ctl.phase === "calib") { const b = $("#bResume"); if (b) b.style.setProperty("--p", clamp(ctl.recalP || 0, 0, 1)); }
     if (!o) return;
     if (this.trip) {
       this.trip.acc.level(Math.abs(o.acc) / LEGEND.acc).text(Math.abs(o.acc).toFixed(2), null, "m/s²");
@@ -576,7 +689,7 @@ const home = {
     } else if (this.liveCharts.length) {
       $("#lvJ").innerHTML = `${Math.abs(o.jerk).toFixed(2)}<small>m/s³</small>`;
       $("#lvV").innerHTML = `${o.ppV.toFixed(1)}<small>gal</small>`;
-      $("#lvD").innerHTML = `${o.dist.toFixed(1)}<small>m</small>`;
+      $("#lvD").innerHTML = `${(ctl.distOff + o.dist).toFixed(1)}<small>m</small>`;
       const n = ctl.live.acc.length, take = Math.min(n, LIVE_WIN), off = Math.max(0, ctl.vert.length - take) / FS;
       SERIES.forEach((s, i) => {
         const arr = ctl.live[s.key]; this.liveCharts[i].setValues(arr.slice(arr.length - take), off);
@@ -714,6 +827,7 @@ const records = {
         const startedAt = imp.startedAt || f.lastModified || Date.now();
         const rec = { id: `ride_${startedAt}_${Math.random().toString(36).slice(2, 7)}`, name, startedAt, rate: imp.rate, imported: true,
           vert: imp.vert, lat: imp.lat, updatedAt: Date.now() };
+        if (imp.segs) rec.segs = imp.segs;
         await store.put(rec); ok++;
       } catch (e) { bad.push(f.name); }
     }
@@ -817,7 +931,7 @@ const detail = {
         <div class="e ${c.e2 ? "two" : ""} ${c.lv >= 0 ? "lv" + c.lv : ""}">${c.e2 ? c.e2.map(x => `<span>${esc(x)}</span>`).join("") : esc(c.e)}</div></div>`).join("")}</div>
       <div class="charts">${series.map((s, i) => `<div class="chart-card glass fade-in" style="animation-delay:${0.1 + i * 0.08}s">
         <div class="h"><b>${s.title}</b><span>${s.unit}</span><em>${esc(comment[s.key] || "")}</em></div><canvas class="chart" id="dc-${s.key}" style="height:180px"></canvas></div>`).join("")}</div>`;
-    series.forEach(s => new Chart($(`#dc-${s.key}`), { values: S[s.key], rate: r.rate, color: s.color, half: s.half, dec: s.dec, unit: s.unit, animate: true, tap: true, marks: s.key === "speed" ? "peak" : true, spans: (s.key === "vibV" || s.key === "vibL") && A.m.cruise.length ? A.m.cruise : null }));
+    series.forEach(s => new Chart($(`#dc-${s.key}`), { values: S[s.key], rate: r.rate, color: s.color, half: s.half, dec: s.dec, unit: s.unit, animate: true, tap: true, marks: s.key === "speed" ? "peak" : true, spans: (s.key === "vibV" || s.key === "vibL") && A.m.cruise.length ? A.m.cruise : null, pauses: A.m.pauses }));
   },
 };
 

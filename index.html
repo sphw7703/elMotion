@@ -379,6 +379,31 @@ body { background: var(--page-bg); background-attachment: fixed; }
 .select-bar .pill-btn.danger, :root[data-ui="dark"] .select-bar .pill-btn.danger { background: var(--danger); color: #fff; }
 .select-bar .pill-btn:disabled { opacity: .4; }
 body.selecting #recList { padding-bottom: 150px; }
+
+/* 일시정지 · 측정 재개 (길게 누르기) */
+.act-row { margin: 0; gap: 8px; display: flex; justify-content: center; }
+#homeActions { position: relative; }
+.act-row .pill-btn { white-space: nowrap; }
+.pill-btn.round { width: 46px; padding: 0; flex: none; }
+.pill-btn.round svg { width: 18px; height: 18px; opacity: 1; }
+.pill-btn.hold { min-width: 150px; }
+/* 안내 문구는 버튼 위에 떠 있게 (화면 높이를 밀어내지 않음) */
+.pause-note { position: absolute; left: 50%; translate: -50% 0; bottom: calc(100% + 10px); width: max-content; max-width: calc(100vw - 32px); z-index: 2;
+  font-size: 13px; line-height: 1.55; color: var(--ink-2); text-align: center; padding: 11px 18px; border-radius: 18px; }
+.pause-note b { color: var(--ink); font-weight: 800; }
+.pause-note.nudge { animation: nudge .42s; }
+@keyframes nudge { 20%, 60% { transform: translateX(-5px); } 40%, 80% { transform: translateX(5px); } }
+.pill-btn.hold { position: relative; overflow: hidden; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; touch-action: none; }
+.pill-btn.hold > svg, .pill-btn.hold > span { position: relative; }
+.pill-btn.hold .fill { position: absolute; inset: 0; background: rgba(255, 255, 255, .26); transform-origin: left center; transform: scaleX(0); pointer-events: none; }
+.pill-btn.hold.holding .fill { transform: scaleX(1); transition: transform .3s linear; }
+.pill-btn.hold.ready { box-shadow: 0 0 0 3px rgba(91, 140, 255, .5), 0 10px 30px -8px rgba(27, 42, 99, .5); }
+:root[data-ui="dark"] .pill-btn.hold .fill { background: rgba(91, 140, 255, .32); }
+.pill-btn.hold.calib .fill { transform: scaleX(var(--p, 0)); transition: transform .1s linear; }
+.pill-btn.hold:disabled { opacity: 1; }
+#homeBody { transition: opacity .3s, filter .3s; }
+#homeBody.paused { opacity: .38; filter: saturate(.4); }
+.live-pill.paused i { animation: none; background: var(--ink-3); }
 </style>
 </head>
 <body>
