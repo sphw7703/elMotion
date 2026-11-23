@@ -731,7 +731,7 @@ const records = {
       const fitMini = t => (t.length >= 6 ? ' style="font-size:10.5px"' : t.length === 5 ? ' style="font-size:12px"' : "");   // 239.6처럼 긴 숫자는 원 안에 들어가게 줄임
       return `<article class="rec-card glass ${this.sel.has(m.id) ? "sel" : ""} ${this.anchor === k ? "anchor" : ""}" data-id="${esc(m.id)}" data-k="${k}" tabindex="0">
         <div class="rc-head"><span class="check"></span>
-          <div class="t"><div class="rc-name">${esc(m.name || fmtDate(m.startedAt))}${m.demo ? '<span class="tag">데모</span>' : ""}${m.imported ? '<span class="tag">가져옴</span>' : ""}</div>
+          <div class="t"><div class="rc-name"><span class="nm">${esc(m.name || fmtDate(m.startedAt))}</span>${m.demo ? '<span class="tag">데모</span>' : ""}${m.imported ? '<span class="tag">가져옴</span>' : ""}</div>
           <div class="rc-date">${m.name ? fmtDate(m.startedAt) + " · " : ""}${fmtDur(m.duration)}</div></div>
           <button class="ic-btn pop" data-act="edit" aria-label="이름 변경">${ICON.edit}</button></div>
         <div class="rc-body"><div class="minis">
