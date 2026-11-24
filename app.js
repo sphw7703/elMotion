@@ -343,6 +343,32 @@ const baro = {
   pause(recSec) { this.paused = true; if (this.samples) this.samples = this.samples.filter(b => b.t <= recSec); this.recSec = recSec; },
   resume() { this.paused = false; this.t0 = performance.now() - (this.recSec || 0) * 1000; },
 };
+/* 측정 나라 (2026-11-24 사용자 확정): GPS 좌표로 나라만 앱 안에서 판별하고 좌표는 버린다.
+   나라별 기준 중력은 가속도계 배율 확인·보정에 쓴다 (위도에 따라 9.78~9.83 m/s²).
+   측정 중에 권한 창이 뜨면 휴대폰을 건드리게 되므로, 앱을 처음 열 때 한 번만 묻고 이후엔 조용히 갱신한다. */
+const geo = {
+  get now() { try { return JSON.parse(prefs.get("geo", "null")); } catch (e) { return null; } },
+  refresh(manual) {
+    if (!navigator.geolocation) { if (manual) toast("이 브라우저에서는 위치를 쓸 수 없어요."); return; }
+    navigator.geolocation.getCurrentPosition(pos => {
+      const c = Core.countryOf(pos.coords.latitude, pos.coords.longitude);      // 좌표는 여기서만 쓰고 저장하지 않는다
+      prefs.set("geo", JSON.stringify({ cc: c.cc, name: c.name, g: c.g, at: Date.now() }));
+      settings.renderGeo(); if (manual) toast(`측정 나라: ${c.name}`);
+    }, () => { if (manual) toast("위치 권한이 없어 나라를 확인하지 못했어요."); },
+    { enableHighAccuracy: false, maximumAge: 6 * 3600e3, timeout: 15000 });
+  },
+  init() {
+    const ask = () => { if (prefs.get("geoAsked")) return; prefs.set("geoAsked", "1"); setTimeout(() => this.refresh(), 1500); };
+    if (navigator.permissions && navigator.permissions.query) {
+      navigator.permissions.query({ name: "geolocation" }).then(p => {
+        if (p.state === "granted") { const g = this.now; if (!g || Date.now() - g.at > 6 * 3600e3) this.refresh(); }
+        else if (p.state === "prompt") ask();
+      }).catch(ask);
+    } else ask();
+  },
+  /** 기록에 남길 값 (나라 코드·이름·기준 중력만) */
+  get forRecord() { const g = this.now; return g ? { cc: g.cc, name: g.name, g: g.g } : null; },
+};
 function analysisOf(rec) {
   // 가속도 센서만으로 계산 (출발 직전 영점 + 전체 적분 + 정지 시점 되짚기). 기압은 기록만 하고 계산에는 쓰지 않는다.
   const k = rec.id + ":" + rec.vert.length + ":" + (rec.segs ? rec.segs.join(".") : "");
@@ -598,6 +624,7 @@ const ctl = {
       baro: baroSamples ? baroSamples.filter(b => b.t <= n / FS) : null };
     if (segs.length > 1) rec.segs = segs;
     if (this.gcal && this.gcal.length) rec.gcal = this.gcal.slice();
+    if (geo.forRecord) rec.geo = geo.forRecord;
     try { await store.put(rec); } catch (e) { toast("기록을 저장하지 못했어요."); }
     records.render();
     detail.open(rec, "home");
@@ -865,6 +892,7 @@ const records = {
         if (imp.segs) rec.segs = imp.segs;
         if (imp.baro) rec.baro = imp.baro;
         if (imp.gcal) rec.gcal = imp.gcal;
+        if (imp.geo) rec.geo = imp.geo;
         await store.put(rec); ok++;
       } catch (e) { bad.push(f.name); }
     }
@@ -984,9 +1012,17 @@ const settings = {
     $("#btnTerms").onclick = () => dialog(`<h3>약관 및 데이터 안내</h3>
       <p>측정 기록은 이 기기의 브라우저 저장소에 보관돼요. 브라우저 데이터를 지우면 함께 지워져요.</p>
       <p>측정값은 휴대폰 센서로 구한 참고값이에요. 공식 승차감 검사를 대신하지 않아요.</p>
+      <p>위치는 측정한 나라를 알아내는 데만 써요. 좌표는 저장하거나 밖으로 보내지 않고, 나라 이름과 그 나라의 기준 중력값만 기록해요.</p>
       <div class="acts"><button class="solid" id="dOk">확인</button></div>`, (b, close) => { b.querySelector("#dOk").onclick = close; });
     this.renderMode();
     this.renderBaro();
+    this.renderGeo();
+    $("#geoCard").onclick = () => geo.refresh(true);
+  },
+  renderGeo() {
+    const g = geo.now;
+    $("#geoDesc").textContent = g ? `${g.name} · 기준 중력 ${g.g.toFixed(3)} m/s²`
+      : "아직 몰라요. 누르면 위치로 나라만 확인해요";
   },
   /** 개발용 기압 기록 상태 (localhost로 열었을 때만 보임) */
   renderBaro() {
@@ -1222,6 +1258,7 @@ const installer = {
   await store.open();
   settings.init();
   ctl.init();
+  geo.init();
   baro.connectBridge();
   glassGuard.check();
   nav.init();

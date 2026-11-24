@@ -389,6 +389,66 @@
     }
     return out;
   }
+
+  /* ───────── 나라와 기준 중력 (2026-11-24 사용자 확정) ─────────
+     GPS 좌표로 나라만 앱 안에서 대략 판별하고(외부로 보내지 않음), 좌표는 버린다.
+     기준 중력은 그 나라 중심 위도의 해수면 정규중력(WGS84 소밀리아나 식) — 위도에 따라 9.78~9.83 m/s² (0.5%).
+     나라 경계는 사각형 근사라 국경 근처 수십 km는 틀릴 수 있지만, 이웃 나라끼리 기준 중력 차이는 무시할 만하다.
+     [코드, 이름, 남, 북, 서, 동] */
+  const COUNTRIES = [
+    ["KR", "대한민국", 33.0, 38.7, 124.5, 132.0], ["KP", "북한", 37.6, 43.1, 124.1, 130.8], ["JP", "일본", 24.0, 45.6, 122.9, 146.0],
+    ["CN", "중국", 18.1, 53.6, 73.5, 134.8], ["TW", "대만", 21.8, 25.4, 119.3, 122.1], ["HK", "홍콩", 22.15, 22.57, 113.8, 114.45],
+    ["MO", "마카오", 22.1, 22.22, 113.52, 113.6], ["MN", "몽골", 41.5, 52.2, 87.7, 119.9], ["RU", "러시아", 41.2, 81.9, 19.6, 180.0],
+    ["VN", "베트남", 8.4, 23.4, 102.1, 109.5], ["TH", "태국", 5.6, 20.5, 97.3, 105.7], ["LA", "라오스", 13.9, 22.5, 100.1, 107.7],
+    ["KH", "캄보디아", 10.4, 14.7, 102.3, 107.7], ["MM", "미얀마", 9.8, 28.6, 92.2, 101.2], ["MY", "말레이시아", 0.85, 7.4, 99.6, 119.3],
+    ["SG", "싱가포르", 1.15, 1.48, 103.6, 104.1], ["ID", "인도네시아", -11.0, 6.1, 95.0, 141.0], ["PH", "필리핀", 4.6, 21.1, 116.9, 126.6],
+    ["BN", "브루나이", 4.0, 5.1, 114.0, 115.4], ["IN", "인도", 6.7, 35.5, 68.1, 97.4], ["BD", "방글라데시", 20.6, 26.6, 88.0, 92.7],
+    ["NP", "네팔", 26.3, 30.5, 80.0, 88.2], ["LK", "스리랑카", 5.9, 9.9, 79.6, 81.9], ["PK", "파키스탄", 23.7, 37.1, 60.9, 77.8],
+    ["KZ", "카자흐스탄", 40.6, 55.4, 46.5, 87.3], ["UZ", "우즈베키스탄", 37.2, 45.6, 56.0, 73.1], ["AE", "아랍에미리트", 22.6, 26.1, 51.6, 56.4],
+    ["QA", "카타르", 24.5, 26.2, 50.7, 51.7], ["SA", "사우디아라비아", 16.3, 32.2, 34.5, 55.7], ["IL", "이스라엘", 29.5, 33.3, 34.3, 35.9],
+    ["TR", "튀르키예", 35.8, 42.1, 26.0, 44.8], ["IR", "이란", 25.1, 39.8, 44.0, 63.3], ["EG", "이집트", 22.0, 31.7, 24.7, 36.9],
+    ["AU", "오스트레일리아", -43.7, -10.7, 113.3, 153.6], ["NZ", "뉴질랜드", -47.3, -34.4, 166.4, 178.6],
+    ["US", "미국", 24.5, 49.4, -124.8, -66.9], ["US", "미국(알래스카)", 51.2, 71.4, -180.0, -129.9], ["US", "미국(하와이)", 18.9, 22.3, -160.3, -154.8],
+    ["CA", "캐나다", 41.7, 83.1, -141.0, -52.6], ["MX", "멕시코", 14.5, 32.7, -118.4, -86.7], ["BR", "브라질", -33.8, 5.3, -73.99, -34.8],
+    ["AR", "아르헨티나", -55.1, -21.8, -73.6, -53.6], ["CL", "칠레", -56.0, -17.5, -75.7, -66.4], ["PE", "페루", -18.4, -0.04, -81.4, -68.7],
+    ["CO", "콜롬비아", -4.2, 12.5, -79.0, -66.9],
+    ["GB", "영국", 49.9, 60.9, -8.2, 1.8], ["IE", "아일랜드", 51.4, 55.4, -10.5, -6.0], ["FR", "프랑스", 41.3, 51.1, -5.2, 9.6],
+    ["ES", "스페인", 36.0, 43.8, -9.3, 3.3], ["PT", "포르투갈", 36.9, 42.2, -9.5, -6.2], ["DE", "독일", 47.3, 55.1, 5.9, 15.0],
+    ["NL", "네덜란드", 50.75, 53.6, 3.3, 7.2], ["BE", "벨기에", 49.5, 51.5, 2.5, 6.4], ["LU", "룩셈부르크", 49.45, 50.18, 5.73, 6.53],
+    ["CH", "스위스", 45.8, 47.8, 5.95, 10.5], ["AT", "오스트리아", 46.4, 49.0, 9.5, 17.2], ["IT", "이탈리아", 36.6, 47.1, 6.6, 18.5],
+    ["DK", "덴마크", 54.5, 57.8, 8.0, 15.2], ["NO", "노르웨이", 57.9, 71.2, 4.6, 31.1], ["SE", "스웨덴", 55.3, 69.1, 11.0, 24.2],
+    ["FI", "핀란드", 59.8, 70.1, 20.5, 31.6], ["PL", "폴란드", 49.0, 54.9, 14.1, 24.2], ["CZ", "체코", 48.55, 51.06, 12.1, 18.9],
+    ["HU", "헝가리", 45.7, 48.6, 16.1, 22.9], ["GR", "그리스", 34.8, 41.8, 19.4, 28.3], ["RO", "루마니아", 43.6, 48.3, 20.2, 29.7],
+    ["UA", "우크라이나", 44.4, 52.4, 22.1, 40.2],
+    ["ZA", "남아프리카공화국", -34.8, -22.1, 16.5, 32.9], ["NG", "나이지리아", 4.3, 13.9, 2.7, 14.7], ["KE", "케냐", -4.7, 5.0, 33.9, 41.9],
+  ];
+  /** 위도의 해수면 정규중력 (WGS84 소밀리아나 식) */
+  function normalGravity(latDeg) {
+    const s2 = Math.sin(latDeg * Math.PI / 180) ** 2;
+    return 9.7803253359 * (1 + 0.00193185265241 * s2) / Math.sqrt(1 - 0.00669437999013 * s2);
+  }
+  /** 군사분계선 대략의 위도 (경도별 꺾은선) */
+  function mdl(lon) {
+    const P = [[124, 37.6], [126.0, 37.70], [126.65, 37.90], [127.2, 38.25], [128.0, 38.33], [128.37, 38.62], [132, 38.62]];
+    if (lon <= P[0][0]) return P[0][1];
+    for (let i = 1; i < P.length; i++) if (lon <= P[i][0]) return P[i - 1][1] + (P[i][1] - P[i - 1][1]) * (lon - P[i - 1][0]) / (P[i][0] - P[i - 1][0]);
+    return P[P.length - 1][1];
+  }
+  /** GPS 좌표 → { cc, name, g } (좌표는 돌려주지 않는다) */
+  function countryOf(lat, lon) {
+    let best = null, area = Infinity;
+    for (const c of COUNTRIES) {
+      const [, , s, n, w, e] = c;
+      if (lat < s || lat > n || lon < w || lon > e) continue;
+      // 한반도: 사각형이 겹치는 군사분계선 근처는 대략의 꺾은선으로 가른다
+      if ((c[0] === "KR" && lat > mdl(lon)) || (c[0] === "KP" && lat <= mdl(lon))) continue;
+      const ar = (n - s) * (e - w);
+      if (ar < area) { area = ar; best = c; }
+    }
+    if (best) return { cc: best[0], name: best[1], g: +normalGravity((best[2] + best[3]) / 2).toFixed(4) };
+    // 목록에 없는 곳: 위도를 5° 단위로만 써서 기준 중력을 정한다
+    return { cc: "--", name: "기타", g: +normalGravity(Math.round(lat / 5) * 5).toFixed(4) };
+  }
   function analyze(vert, lat, fs = FS, segs) {
     const n = vert.length, hasLat = !!lat;
     const plan = planSegs(vert, n, segs, fs);
@@ -398,6 +458,29 @@
       vibL: new Float32Array(n), speed: new Float32Array(n), dist: new Float32Array(n),
     };
     const mot = new Float32Array(n), moving = new Uint8Array(n);
+    /* 실제 정지 순간 (착상 포함, 2026-11-24 사용자 확정)
+       감속이 끝난 뒤 최대 10초까지는 착상(저속 접근·꿀렁임)이 이어질 수 있다고 보고, 그 안의 마지막 움직임이 끝난 뒤 0.5초를 정지 순간으로 한다.
+       새 운행처럼 큰 움직임(본 감속의 절반 이상)이 나오면 거기서 착상 찾기를 멈춘다.
+       a: 운행 시작, dEnd: 감속을 찾을 끝(정지 판정 순간), limit: 더 볼 수 있는 끝 */
+    const LEVEL_MAX = Math.round(10 * fs);
+    function stopAt(a, dEnd, limit) {
+      let pk = 0; for (let i = a; i < dEnd; i++) if (Math.abs(S.speed[i]) > Math.abs(pk)) pk = S.speed[i];
+      const dir = Math.sign(pk) || 1;
+      let mx = 0; for (let i = a; i < dEnd; i++) mx = Math.max(mx, -dir * mot[i]);
+      if (mx < 0.05) return null;
+      let kd = dEnd - 1; while (kd > a && -dir * mot[kd] < 0.5 * mx) kd--;
+      let Ld = kd; while (Ld < limit - 1 && -dir * mot[Ld] > 0.05) Ld++;
+      const big = Math.max(0.1, 0.5 * mx), wEnd = Math.min(limit, Ld + LEVEL_MAX);
+      // 다음 운행이 시작되면(큰 움직임) 그 움직임이 커지기 시작한 부분까지 착상에서 빼야 하므로, 움직임 덩어리 단위로 본다
+      let last = Ld, runLast = Ld, inRun = false, k = Ld;
+      for (; k < wEnd; k++) {
+        const m = Math.abs(mot[k]);
+        if (m > big) { last = runLast; break; }
+        if (m > P.MOVE) { if (!inRun) { runLast = last; inRun = true; } last = k; }
+        else if (inRun && m <= P.DEAD) inRun = false;
+      }
+      return { rs: Math.min(limit, last + Math.round(P.QUIET_SEC * fs)), Ld, quiet: Math.min(k, limit) - last };
+    }
     let distOff = 0;
     const zupt = [];     // [운행 시작, 정지 판정 순간, 그때 남아 있던 속력(m/s)]
     for (const g of plan.groups) {
@@ -421,11 +504,38 @@
         for (const k of [...snaps.keys()]) if (k >= fix.r) snaps.delete(k);
       }
       // 정지 판정 순간에 남아 있던 속력 = 그 운행 동안 쌓인 가속도 센서 오차
+      const found = [];
       for (let r = s + 1; r < e; r++) {
         if (!(moving[r - 1] && !moving[r]) || !snaps.has(r)) continue;
         let a = r - 1; while (a > s && moving[a - 1]) a--;
         while (a > s && S.speed[a - 1] !== 0) a--;            // 움직이기 시작한 첫 순간까지
-        zupt.push([a, r, snaps.get(r).v, s]);
+        found.push([a, r, snaps.get(r).v]);
+      }
+      // 측정이 끝날 때까지 '정지'로 판정되지 못한 마지막 운행 (센서 오차가 커서 남은 속력이 정지 기준보다 큰 경우, 2026-11-24 삼창아파트):
+      // 감속을 마치고 착상까지 끝나 조용해졌다면 정지로 본다. 정속 중에 측정을 끝낸 경우와 구별하려고, 최고 속력 뒤 감속으로 속력이 절반 아래로 내려왔을 때만.
+      if (e - s > 2 && moving[e - 1]) {
+        let a = e - 1; while (a > s && moving[a - 1]) a--;
+        while (a > s && S.speed[a - 1] !== 0) a--;
+        const st = stopAt(a, e, e);
+        if (st && st.quiet >= Math.round(0.3 * fs)) {
+          const z0 = Math.max(s, a - Math.round(fs));
+          let b0 = 0; for (let i = z0; i < a; i++) b0 += vert[i]; b0 = a > z0 ? b0 / (a - z0) : 0;
+          let v = 0, pk = 0; for (let i = a; i < st.Ld; i++) { v += (vert[i] - b0) / fs; pk = Math.max(pk, Math.abs(v)); }
+          if (pk > 0.1 && Math.abs(v) < 0.5 * pk) found.push([a, e, S.speed[Math.max(a, st.rs - 1)] / 60]);
+        }
+      }
+      // 실제 정지 순간(착상 포함)을 정하고, 그 안에 들어온 착상 꿈틀거림(작은 '운행')은 앞 운행에 합친다
+      let until = -1;
+      for (const [a, r, vres] of found) {
+        if (a < until) {                                       // 앞 운행의 착상에 속한 꿈틀거림: 정지 순간 뒤로 남은 부분은 멈춘 것으로
+          for (let k = until; k < r; k++) { S.speed[k] = 0; moving[k] = 0; }
+          continue;
+        }
+        const st = stopAt(a, r, e), rs = st ? Math.max(a + 2, st.rs) : r;
+        zupt.push([a, rs, vres, s]);
+        for (let k = a; k < rs; k++) moving[k] = 1;
+        for (let k = rs; k < r; k++) { S.speed[k] = 0; moving[k] = 0; }
+        until = rs;
       }
       if (e > s) distOff = S.dist[e - 1];
     }
@@ -445,10 +555,12 @@
         continue;
       }
       let b0 = 0; for (let i = z0; i < a; i++) b0 += vert[i]; b0 /= (a - z0);
-      let v = 0; const raw = new Float64Array(L);
-      for (let k = a; k < r; k++) { v += (vert[k] - b0) / fs; raw[k - a] = v * 60; }
-      const res = raw[L - 1];
-      for (let k = a; k < r; k++) S.speed[k] = raw[k - a] - res * (k - a + 1) / L;
+      // 되짚는 시점 r = 실제로 멈춘 순간 (착상까지 끝난 뒤 0.5초, stopAt). 정지 판정이 늦거나 이르게 내려져도 그 차이를 운행에 떠넘기지 않는다
+      const rs = r, Ls = rs - a;
+      let v = 0; const raw = new Float64Array(Ls);
+      for (let k = a; k < rs; k++) { v += (vert[k] - b0) / fs; raw[k - a] = v * 60; }
+      const res = raw[Ls - 1];
+      for (let k = a; k < rs; k++) S.speed[k] = raw[k - a] - res * (k - a + 1) / Ls;
     }
     if (zupt.length) { let d = 0; for (let i = 0; i < n; i++) { d += Math.abs(S.speed[i]) / 60 / fs; S.dist[i] = d; } }
 
@@ -696,7 +808,7 @@
      흔들림(A95): ~8 아주 훌륭, ~10 좋음, ~20 일반적, ~30 좋지 않음, 그 이상 불쾌
      가감속 모양(가감속도+저크+가가가속도): 내부 점수 → 등급(훌륭/좋아요/무난/아쉬워요/점검) + 한마디 평
      속력: ~70 저속, ~130 중속, ~250 고속, ~500 초고속, 그 이상 '초고속의 초월' */
-  const EVAL_VER = 19;
+  const EVAL_VER = 22;
   function accGrade(a) {
     if (a <= 0.4) return { lv: 0, t: "거의 느껴지지 않을 만큼 순해요", s: "순해요" };
     if (a <= 0.7) return { lv: 1, t: "부드러워요", s: "부드러워요" };
@@ -916,6 +1028,10 @@
     // 보정할 때 잰 중력 크기 (가속도계 배율 확인용)
     let gcal = null;
     { const k = r2.findIndex(c => String(c).trim() === "gravity_m_s2"); if (k >= 0) { const g = String(r2[k + 1] || "").split(";").map(Number).filter(x => x > 5 && x < 15); if (g.length) gcal = g; } }
+    let geo = null;
+    { const k = r2.findIndex(c => String(c).trim() === "country"), j = r2.findIndex(c => String(c).trim() === "gravity_ref_m_s2");
+      if (k >= 0) { const cc = String(r2[k + 1] || "").trim(), f = COUNTRIES.find(c => c[0] === cc), g = j >= 0 ? Number(r2[j + 1]) : NaN;
+        geo = { cc, name: f ? f[1] : "기타", g: g > 9 && g < 10.5 ? g : null }; } }
     let segs = null;
     if (sg.length) {
       const st = [0];
@@ -923,7 +1039,7 @@
       if (st.length > 1) segs = st;
     }
     const baro = pr.length > 4 ? pr.map(({ k, p }) => ({ t: ts[k], p })) : null;
-    return { vert: vN.data, lat: lN ? lN.data : null, rate: FS, startedAt, segs, baro, gcal, info: { srcRate, vertUnit: vN.unit, latUnit: lN ? lN.unit : null } };
+    return { vert: vN.data, lat: lN ? lN.data : null, rate: FS, startedAt, segs, baro, gcal, geo, info: { srcRate, vertUnit: vN.unit, latUnit: lN ? lN.unit : null } };
   }
 
   function exportCsv(rec, A) {
@@ -932,7 +1048,7 @@
     const when = `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
     const lines = [
       `# name,"${(rec.name || "").replace(/"/g, '""')}"`,
-      `# started_at,${when},sample_rate_hz,${rec.rate}${rec.gcal && rec.gcal.length ? ",gravity_m_s2," + rec.gcal.map(g => g.toFixed(4)).join(";") : ""}`,
+      `# started_at,${when},sample_rate_hz,${rec.rate}${rec.gcal && rec.gcal.length ? ",gravity_m_s2," + rec.gcal.map(g => g.toFixed(4)).join(";") : ""}${rec.geo ? `,country,${rec.geo.cc},gravity_ref_m_s2,${rec.geo.g}` : ""}`,
       "time_s,vertical_accel_m_s2,accel_m_s2,jerk_m_s3,lateral_accel_m_s2,vertical_vib_gal,lateral_vib_gal,speed_m_min,distance_m,segment,pressure_hpa",
     ];
     const bd = segBounds(n, rec.segs);
@@ -1008,7 +1124,7 @@
 
   const Core = {
     FS, P, Biquad, Resampler, StabilityDetector, Calibration, AbnormalDetector, PeakToPeak, RideAnalyzer,
-    analyze, segBounds, evaluate, rideShape, _dbg: { zp, grad, peaks }, EVAL_VER, ppStats, percentile, parseCsv, importCsv, exportCsv, DemoSignal,
+    analyze, segBounds, countryOf, normalGravity, evaluate, rideShape, _dbg: { zp, grad, peaks }, EVAL_VER, ppStats, percentile, parseCsv, importCsv, exportCsv, DemoSignal,
   };
   if (typeof module !== "undefined" && module.exports) module.exports = Core;
   else root.Core = Core;

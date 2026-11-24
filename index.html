@@ -416,6 +416,10 @@ body.selecting #recList { padding-bottom: 150px; }
     radial-gradient(ellipse 26% 15% at 38% 21%, rgba(255, 255, 255, .55), transparent 70%),
     radial-gradient(ellipse 47.6% 46% at 50% 49.8%, var(--gf-body) 0 86%, var(--gf-rim) 95%, var(--gf-edge) 99%, transparent 100%); }
 :root.no-glass .sphere .glass-top, :root.no-glass .mini::after { background: radial-gradient(ellipse 26% 15% at 38% 21%, rgba(255, 255, 255, .5), transparent 70%); }
+
+/* 측정 나라 카드 (누르면 위치로 나라 다시 확인) */
+.geo-card { display: block; width: 100%; text-align: left; font: inherit; color: inherit; cursor: pointer; }
+.geo-card svg { flex: none; width: 30px; height: 30px; padding: 7px; border-radius: 50%; background: var(--navy-grad); color: var(--on-accent); }
 </style>
 </head>
 <body>
@@ -464,6 +468,12 @@ body.selecting #recList { padding-bottom: 150px; }
             <div class="seg" id="modeSeg"><span class="thumb"></span><button data-mode="auto">자동</button><button data-mode="manual">수동</button></div>
           </div>
         </div>
+        <button class="set-card glass geo-card" id="geoCard" type="button">
+          <div class="set-row">
+            <div class="t"><h3 style="margin:0">측정 나라</h3><p id="geoDesc"></p></div>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M9 6l6 6-6 6"/></svg>
+          </div>
+        </button>
         <div class="set-card glass" id="baroCard" hidden>
           <div class="set-row">
             <div class="t"><h3 style="margin:0">기압 기록 (개발용)</h3><p id="baroDesc"></p></div>
