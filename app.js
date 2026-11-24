@@ -3,7 +3,7 @@
 
 /* ───────── 상수 ───────── */
 const FS = Core.FS;
-const LEGEND = { acc: 1.5, lat: 30, spd: 600 };        // 물 높이 범례 (화면에 표시하지 않음)
+const LEGEND = { acc: 1.5, lat: 30, latA: 20, spd: 600 };   // 물 높이 범례 (화면에 표시하지 않음). lat: 실시간 p-p, latA: 기록의 |A95|
 const CUT = Math.round(Core.P.CUT_SEC * FS);
 const CUT_MANUAL = Math.round(0.3 * FS);   // 수동 모드 종료 시 버려지는 마지막 0.3초
 const HOLD_MS = 300;                       // 측정 재개: 이만큼 길게 눌러야 한다
@@ -27,6 +27,8 @@ const ICON = {
   spark: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l1.8 5.6L19.5 9l-5.7 1.6L12 16l-1.8-5.4L4.5 9l5.7-1.4z"/><path d="M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8z" opacity=".6"/></svg>',
   stop: '<svg viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2.5"/></svg>',
   star: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2.5c.6 4.6 2.9 6.9 7.5 7.5v.1c-4.6.6-6.9 2.9-7.5 7.5h-.1c-.6-4.6-2.9-6.9-7.5-7.5V10c4.6-.6 6.9-2.9 7.5-7.5z"/></svg>',
+  // AI 평가 칩의 별: 별 모양에 꼭 맞춘 틀 (틀의 가운데 = 별의 가운데 → 옆 글자 가운데와 맞춘다)
+  aiStar: '<svg class="ai-star" viewBox="4.5 2.5 15 15.1" fill="currentColor"><path d="M12 2.5c.6 4.6 2.9 6.9 7.5 7.5v.1c-4.6.6-6.9 2.9-7.5 7.5h-.1c-.6-4.6-2.9-6.9-7.5-7.5V10c4.6-.6 6.9-2.9 7.5-7.5z"/></svg>',
   play: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5.5v13a1 1 0 001.5.9l10.4-6.5a1 1 0 000-1.8L9.5 4.6A1 1 0 008 5.5z"/></svg>',
   pause: '<svg viewBox="0 0 24 24" fill="currentColor"><rect x="6.5" y="5" width="4" height="14" rx="1.4"/><rect x="13.5" y="5" width="4" height="14" rx="1.4"/></svg>',
 };
@@ -76,7 +78,7 @@ const theme = {
   apply() {
     const r = this.resolved();
     document.documentElement.dataset.ui = r;
-    const m = document.querySelector('meta[name="theme-color"]'); if (m) m.content = r === "dark" ? "#080D1D" : "#E9EDF5";
+    const m = document.querySelector('meta[name="theme-color"]'); if (m) m.content = r === "dark" ? "#0A0E1B" : "#E9EDF5";
     document.querySelectorAll("#themeOpts .theme-opt").forEach(b => b.classList.toggle("on", b.dataset.theme === this.pref));
     charts.redrawAll();
   },
@@ -134,8 +136,8 @@ class Sphere {
 /* ───────── 그래프 ───────── */
 const charts = {
   set: new Set(),
-  redrawAll() { this.set.forEach(c => c.draw()); },
-  clear(root) { this.set.forEach(c => { if (!root || root.contains(c.c)) { c.destroy(); } }); },
+  redrawAll() { this.set.forEach(c => { if (c.c.isConnected) c.draw(); else c.destroy(); }); },
+  clear(root) { this.set.forEach(c => { if (!root || root.contains(c.c) || !c.c.isConnected) { c.destroy(); } }); },
 };
 class Chart {
   /** o: {values, rate, color, half, dec, unit, animate, tap, window, offset} */
@@ -144,12 +146,16 @@ class Chart {
     this.prog = o.animate ? 0 : 1; this.cursor = -1;
     charts.set.add(this);
     this.ro = new ResizeObserver(() => this.draw()); this.ro.observe(canvas);
+    // 오래 두거나 백그라운드에 다녀오면 브라우저가 캔버스를 비울 수 있다 → 되살아나면 다시 그린다
+    canvas.addEventListener("contextrestored", () => this.draw());
     if (o.animate) {
       this.io = new IntersectionObserver(es => { if (es.some(e => e.isIntersecting)) { this.io.disconnect(); this.play(); } }, { threshold: 0.3 });
       this.io.observe(canvas);
     }
     if (o.tap) this.bindTap();
   }
+  /** 그리는 범위 [처음, 끝] (표본 번호) */
+  range() { const n = (this.o.values || []).length; return [0, Math.max(n - 1, 1)]; }
   play() {
     const t0 = performance.now(), dur = 1100;
     const step = now => { this.prog = clamp((now - t0) / dur, 0, 1); this.draw(); if (this.prog < 1 && this.c.isConnected) requestAnimationFrame(step); };
@@ -162,7 +168,8 @@ class Chart {
     const pick = e => {
       const r = this.c.getBoundingClientRect(), x = e.clientX - r.left, L = 44, R = r.width - 12;
       const n = this.o.values.length; if (n < 2) return;
-      const i = clamp(Math.round((x - L) / (R - L) * (n - 1)), 0, n - 1);
+      const [a, b] = this.range();
+      const i = clamp(Math.round(a + (x - L) / (R - L) * (b - a)), 0, n - 1);
       if (i !== this.cursor) { this.cursor = i; this.draw(); }
     };
     this.c.addEventListener("pointerdown", e => { active = true; pick(e); });
@@ -177,10 +184,11 @@ class Chart {
     const g = this.g; g.setTransform(dpr, 0, 0, dpr, 0, 0); g.clearRect(0, 0, W, H);
     const o = this.o, v = o.values || [], n = v.length, rate = o.rate || FS;
     const L = 44, R = W - 12, T = 12, B = H - 22, pw = R - L, ph = B - T;
-    const span = o.window ? Math.max(o.window - 1, 1) : Math.max(n - 1, 1);
-    let mx = 0; for (let i = 0; i < n; i++) { const a = Math.abs(v[i]); if (a > mx && !Number.isNaN(a)) mx = a; }
+    const [va, vb] = o.window ? [0, Math.max(o.window - 1, 1)] : this.range();
+    const span = Math.max(vb - va, 1), ia = Math.max(0, Math.floor(va)), ib = Math.min(n - 1, Math.ceil(vb));
+    let mx = 0; for (let i = ia; i <= ib; i++) { const a = Math.abs(v[i]); if (a > mx && !Number.isNaN(a)) mx = a; }
     const half = Math.max(o.half, mx * 1.12);
-    const y = val => T + (1 - (val + half) / (2 * half)) * ph, x = i => L + i / span * pw;
+    const y = val => T + (1 - (val + half) / (2 * half)) * ph, x = i => L + (i - va) / span * pw;
     const ink3 = cssVar("--ink-3"), line = cssVar("--line");
     g.font = `600 10px ${cssVar("--font-num") || "sans-serif"}`;
     // 축: 위·0·아래 (스케치처럼 세 값) + 옅은 격자
@@ -194,29 +202,33 @@ class Chart {
     }
     g.setLineDash([]);
     // 시간 눈금
-    const off = o.offset || 0, t0 = off, t1 = off + span / rate, st = niceStep(t1 - t0);
+    const off = o.offset || 0, t0 = off + (o.window ? 0 : va / rate), t1 = t0 + span / rate, st = niceStep(t1 - t0);
     g.textAlign = "center"; g.textBaseline = "top"; g.fillStyle = ink3;
     for (let t = Math.ceil(t0 / st) * st; t <= t1 + 1e-6; t += st) {
       const px = L + (t - t0) / (t1 - t0) * pw;
-      g.fillText(`${+t.toFixed(1)}s`, clamp(px, L + 8, R - 8), B + 6);
+      g.fillText(`${+t.toFixed(st < 0.1 ? 2 : 1)}s`, clamp(px, L + 8, R - 8), B + 6);
     }
     if (n < 2) return;
     // 평가 구간(정속 주행) 옅게 표시
     const inSpan = i => !o.spans || o.spans.some(([a, b]) => i >= a * rate && i <= b * rate);
     if (o.spans) {
       g.fillStyle = hexA(o.color, .09);
-      for (const [a, b] of o.spans) { const xa = x(Math.round(a * rate)), xb = x(Math.round(b * rate)); g.fillRect(xa, T, Math.max(1, xb - xa), ph); }
+      for (const [a, b] of o.spans) {
+        const xa = Math.max(L, x(Math.round(a * rate))), xb = Math.min(R, x(Math.round(b * rate)));
+        if (xb > xa) g.fillRect(xa, T, Math.max(1, xb - xa), ph);
+      }
     }
     // 선 (점이 많으면 픽셀 열마다 최소/최대)
-    const upto = Math.floor((n - 1) * this.prog);
+    const upto = o.window ? n - 1 : Math.min(ib, Math.floor(ia + (ib - ia) * this.prog));
     g.save(); g.beginPath(); g.rect(L, T - 2, pw * (o.window ? 1 : this.prog) + 1, ph + 4); g.clip();
     const path = new Path2D();
-    const step = Math.max(1, Math.floor(n / (pw * 1.2)));
+    const step = Math.max(1, Math.floor((ib - ia + 1) / (pw * 1.2)));
     let first = true, lastX = L;
+    const from = o.window ? 0 : Math.max(0, ia - 1);
     if (step <= 1) {
-      for (let i = 0; i <= (o.window ? n - 1 : upto); i++) { if (Number.isNaN(v[i])) continue; const px = x(i), py = y(v[i]); if (first) { path.moveTo(px, py); first = false; } else path.lineTo(px, py); lastX = px; }
+      for (let i = from; i <= Math.min(n - 1, upto + 1); i++) { if (Number.isNaN(v[i])) continue; const px = x(i), py = y(v[i]); if (first) { path.moveTo(px, py); first = false; } else path.lineTo(px, py); lastX = px; }
     } else {
-      for (let i = 0; i <= upto; i += step) {
+      for (let i = from; i <= upto; i += step) {
         let lo = Infinity, hi = -Infinity;
         for (let k = i; k < Math.min(n, i + step); k++) { if (v[k] < lo) lo = v[k]; if (v[k] > hi) hi = v[k]; }
         if (!isFinite(lo)) continue;
@@ -224,7 +236,7 @@ class Chart {
       }
     }
     // 면 채우기
-    const area = new Path2D(path); area.lineTo(lastX, y(0)); area.lineTo(L, y(0)); area.closePath();
+    const area = new Path2D(path); area.lineTo(lastX, y(0)); area.lineTo(Math.max(L, x(from)), y(0)); area.closePath();
     const grad = g.createLinearGradient(0, T, 0, B); grad.addColorStop(0, hexA(o.color, .28)); grad.addColorStop(.5, hexA(o.color, .04)); grad.addColorStop(1, hexA(o.color, .28));
     g.fillStyle = grad; g.fill(area);
     g.strokeStyle = o.color; g.lineWidth = 1.8; g.lineJoin = "round"; g.stroke(path);
@@ -233,7 +245,7 @@ class Chart {
     if (o.pauses && o.pauses.length) {
       const c3 = cssVar("--ink-3");
       for (const t of o.pauses) {
-        const i = Math.round((t - off) * rate); if (i < 0 || i > span) continue;
+        const i = Math.round((t - off) * rate); if (i < va || i > vb) continue;
         const px = Math.round(x(i)) + .5;
         g.strokeStyle = c3; g.lineWidth = 1; g.globalAlpha = .9; g.setLineDash([2, 3]);
         g.beginPath(); g.moveTo(px, T + 12); g.lineTo(px, B); g.stroke(); g.setLineDash([]);
@@ -246,8 +258,8 @@ class Chart {
     if (o.marks && n > 1 && this.prog >= 1) {
       let hi = 0, lo = 0;
       hi = lo = -1;
-      for (let i = 0; i < n; i++) { if (!inSpan(i) || Number.isNaN(v[i])) continue; if (hi < 0 || v[i] > v[hi]) hi = i; if (lo < 0 || v[i] < v[lo]) lo = i; }
-      if (hi < 0) hi = lo = 0;
+      for (let i = ia; i <= ib; i++) { if (!inSpan(i) || Number.isNaN(v[i])) continue; if (hi < 0 || v[i] > v[hi]) hi = i; if (lo < 0 || v[i] < v[lo]) lo = i; }
+      if (hi < 0) hi = lo = -1;            // 확대한 범위에 평가 구간이 없으면 표시하지 않음
       g.font = `800 11px ${cssVar("--font-num")}`; g.textAlign = "center";
       const mark = (i, above) => {
         const val = v[i]; if (Number.isNaN(val) || Math.abs(val) < Math.pow(10, -o.dec)) return;
@@ -260,13 +272,14 @@ class Chart {
         g.fillStyle = cssVar("--ink"); g.textBaseline = above ? "bottom" : "top";
         g.fillText(label, clamp(px, L + tw / 2 + 2, R - tw / 2 - 2), above ? ty - 3 : ty - 9);
       };
-      if (o.marks === "peak") {          // 속력: 방향별 최고 속력만 (3 m/min 미만은 표시 안 함)
+      if (hi < 0) { /* 표시할 값 없음 */ }
+      else if (o.marks === "peak") {     // 속력: 방향별 최고 속력만 (3 m/min 미만은 표시 안 함)
         if (v[hi] >= 3) mark(hi, true);
         if (v[lo] <= -3) mark(lo, false);
       } else { mark(hi, true); mark(lo, false); }
     }
     // 탭한 지점
-    if (this.cursor >= 0 && this.cursor < n && this.prog >= 1) {
+    if (this.cursor >= ia && this.cursor <= ib && this.cursor < n && this.prog >= 1) {
       const i = this.cursor, px = x(i), val = v[i];
       g.strokeStyle = cssVar("--ink-2"); g.globalAlpha = .5; g.setLineDash([3, 3]); g.beginPath(); g.moveTo(px, T); g.lineTo(px, B); g.stroke(); g.setLineDash([]); g.globalAlpha = 1;
       if (!Number.isNaN(val)) {
@@ -342,32 +355,6 @@ const baro = {
   // 일시정지: 기록된 시간(recSec)까지만 남기고, 재개하면 그 시각부터 이어서 센다
   pause(recSec) { this.paused = true; if (this.samples) this.samples = this.samples.filter(b => b.t <= recSec); this.recSec = recSec; },
   resume() { this.paused = false; this.t0 = performance.now() - (this.recSec || 0) * 1000; },
-};
-/* 측정 나라 (2026-11-24 사용자 확정): GPS 좌표로 나라만 앱 안에서 판별하고 좌표는 버린다.
-   나라별 기준 중력은 가속도계 배율 확인·보정에 쓴다 (위도에 따라 9.78~9.83 m/s²).
-   측정 중에 권한 창이 뜨면 휴대폰을 건드리게 되므로, 앱을 처음 열 때 한 번만 묻고 이후엔 조용히 갱신한다. */
-const geo = {
-  get now() { try { return JSON.parse(prefs.get("geo", "null")); } catch (e) { return null; } },
-  refresh(manual) {
-    if (!navigator.geolocation) { if (manual) toast("이 브라우저에서는 위치를 쓸 수 없어요."); return; }
-    navigator.geolocation.getCurrentPosition(pos => {
-      const c = Core.countryOf(pos.coords.latitude, pos.coords.longitude);      // 좌표는 여기서만 쓰고 저장하지 않는다
-      prefs.set("geo", JSON.stringify({ cc: c.cc, name: c.name, g: c.g, at: Date.now() }));
-      settings.renderGeo(); if (manual) toast(`측정 나라: ${c.name}`);
-    }, () => { if (manual) toast("위치 권한이 없어 나라를 확인하지 못했어요."); },
-    { enableHighAccuracy: false, maximumAge: 6 * 3600e3, timeout: 15000 });
-  },
-  init() {
-    const ask = () => { if (prefs.get("geoAsked")) return; prefs.set("geoAsked", "1"); setTimeout(() => this.refresh(), 1500); };
-    if (navigator.permissions && navigator.permissions.query) {
-      navigator.permissions.query({ name: "geolocation" }).then(p => {
-        if (p.state === "granted") { const g = this.now; if (!g || Date.now() - g.at > 6 * 3600e3) this.refresh(); }
-        else if (p.state === "prompt") ask();
-      }).catch(ask);
-    } else ask();
-  },
-  /** 기록에 남길 값 (나라 코드·이름·기준 중력만) */
-  get forRecord() { const g = this.now; return g ? { cc: g.cc, name: g.name, g: g.g } : null; },
 };
 function analysisOf(rec) {
   // 가속도 센서만으로 계산 (출발 직전 영점 + 전체 적분 + 정지 시점 되짚기). 기압은 기록만 하고 계산에는 쓰지 않는다.
@@ -541,7 +528,6 @@ const ctl = {
   },
   begin(cal) {
     this.state = "measure"; this.phase = "run"; this.cal = cal; this.progress = 0;
-    this.gcal = [cal.g];      // 보정할 때 휴대폰이 잰 중력 크기 (가속도계 배율 오차 확인용, 실제 중력 ≈ 9.80 m/s²)
     this.segs = [0]; this.distOff = 0;
     this.abn = this.mode === "auto" ? new Core.AbnormalDetector(cal, FS) : null;
     this.an = new Core.RideAnalyzer(FS);
@@ -595,7 +581,6 @@ const ctl = {
     if (this.rb.length < RECAL_N) return;
     const m = [0, 0, 0]; for (const p of this.rb) for (let i = 0; i < 3; i++) m[i] += p[i] / this.rb.length;
     this.cal = new Core.Calibration(m[0], m[1], m[2]);
-    if (this.gcal) this.gcal.push(this.cal.g);
     this.abn = this.mode === "auto" ? new Core.AbnormalDetector(this.cal, FS) : null;
     this.distOff += this.o ? this.o.dist : 0;
     this.an = new Core.RideAnalyzer(FS); this.o = null;
@@ -623,8 +608,6 @@ const ctl = {
       vert: Float32Array.from(this.vert.slice(0, n)), lat: Float32Array.from(this.lat.slice(0, n)), updatedAt: Date.now(),
       baro: baroSamples ? baroSamples.filter(b => b.t <= n / FS) : null };
     if (segs.length > 1) rec.segs = segs;
-    if (this.gcal && this.gcal.length) rec.gcal = this.gcal.slice();
-    if (geo.forRecord) rec.geo = geo.forRecord;
     try { await store.put(rec); } catch (e) { toast("기록을 저장하지 못했어요."); }
     records.render();
     detail.open(rec, "home");
@@ -785,7 +768,7 @@ const records = {
           <button class="ic-btn pop" data-act="edit" aria-label="이름 변경">${ICON.edit}</button></div>
         <div class="rc-body"><div class="minis">
           <div class="mini k-acc" style="--lv:${lv(m.accPeak, "acc")}%"><span class="ms two"><b>${(m.accMax ?? m.accPeak).toFixed(2)}</b><b>${(m.decMax ?? m.accPeak).toFixed(2)}</b><i>m/s²</i></span></div>
-          <div class="mini k-lat" style="--lv:${m.latA95 == null ? 0 : lv(m.latA95, "lat")}%"><span class="ms"><b${fitMini(lat)}>${lat}</b><i>${m.latA95 == null ? "" : "gal"}</i></span></div>
+          <div class="mini k-lat" style="--lv:${m.latA95 == null ? 0 : lv(m.latA95, "latA")}%"><span class="ms"><b${fitMini(lat)}>${lat}</b><i>${m.latA95 == null ? "" : "gal"}</i></span></div>
           <div class="mini k-spd" style="--lv:${lv(m.speedMax, "spd")}%"><span class="ms"><b${fitMini(m.speedMax.toFixed(1))}>${m.speedMax.toFixed(1)}</b><i>m/min</i></span></div></div>
           <div class="rc-line">${esc(firstSentence(m.overall))}</div></div></article>`;
     }).join("");
@@ -879,25 +862,30 @@ const records = {
   async importFiles(files) {
     if (!files.length) return;
     if (!(await confirmDlg(`${files.length}개 파일을 가져올까요?`, ""))) return;
-    let ok = 0; const bad = [];
+    let ok = 0; const bad = [], notRide = [];
     for (const f of files) {
       try {
         const buf = await f.arrayBuffer();
         let text; try { text = new TextDecoder("utf-8", { fatal: true }).decode(buf); } catch (e) { text = new TextDecoder("euc-kr").decode(buf); }
-        const imp = Core.importCsv(text);
-        const name = f.name.replace(/\.csv$/i, "");
+        const isTxt = /\.txt$/i.test(f.name);
+        const imp = isTxt ? Core.importTxt(text) : Core.importCsv(text);
+        const name = f.name.replace(/\.(csv|txt)$/i, "");
         const startedAt = imp.startedAt || f.lastModified || Date.now();
         const rec = { id: `ride_${startedAt}_${Math.random().toString(36).slice(2, 7)}`, name, startedAt, rate: imp.rate, imported: true,
           vert: imp.vert, lat: imp.lat, updatedAt: Date.now() };
         if (imp.segs) rec.segs = imp.segs;
         if (imp.baro) rec.baro = imp.baro;
-        if (imp.gcal) rec.gcal = imp.gcal;
-        if (imp.geo) rec.geo = imp.geo;
+        if (imp.zOnly) rec.zOnly = true;
         await store.put(rec); ok++;
-      } catch (e) { bad.push(f.name); }
+      } catch (e) { (e && e.code === Core.TXT_BAD ? notRide : bad).push(f.name); }
     }
     await this.render();
-    toast(bad.length ? `${ok}개를 가져왔어요. ${bad.length}개는 형식이 맞지 않았어요: ${bad.slice(0, 2).join(", ")}${bad.length > 2 ? " 외" : ""}` : `${ok}개 파일을 가져왔어요.`, 4500);
+    if (notRide.length) {
+      // 형식이 다른 .txt: 팝업으로 알린다
+      dialog(`<h3>승차감 기록이 아닌 것 같아요.</h3><p>${esc(notRide.slice(0, 3).join(", "))}${notRide.length > 3 ? ` 외 ${notRide.length - 3}개` : ""}</p>
+        <div class="acts"><button class="solid" id="dOk">확인</button></div>`, (b, close) => { b.querySelector("#dOk").onclick = close; });
+    }
+    if (ok || bad.length) toast(bad.length ? `${ok}개를 가져왔어요. ${bad.length}개는 형식이 맞지 않았어요: ${bad.slice(0, 2).join(", ")}${bad.length > 2 ? " 외" : ""}` : `${ok}개 파일을 가져왔어요.`, 4500);
   },
 };
 
@@ -926,6 +914,17 @@ async function saveFile(filename, text) {
 /* ════════════════════════════════════════════════════════════════
    기록 상세
    ════════════════════════════════════════════════════════════════ */
+/** AI 평가 무지개: 모드별 레퍼런스 6색을 무작위 순서로 (처음 색을 끝에 한 번 더 → 흐르고 돌 때 이음매가 없다)
+    라이트: 서리 유리 구슬의 파스텔 테두리 / 다크: 어둠 속에 빛나는 장밋빛·보랏빛·얼음빛 */
+const RAINBOW = {
+  light: ["#F4C6D7", "#F7D2B0", "#EEE9A6", "#A9E8C4", "#86D6E2", "#C9C6F2"],
+  dark: ["#F2A7BE", "#F0A6E6", "#B39AF0", "#7684E6", "#A9DDF3", "#FFD6E5"],
+};
+function rainbowColors(el) {
+  const order = [0, 1, 2, 3, 4, 5];
+  for (let i = order.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [order[i], order[j]] = [order[j], order[i]]; }
+  order.forEach((k, i) => { el.style.setProperty(`--l${i + 1}`, RAINBOW.light[k]); el.style.setProperty(`--d${i + 1}`, RAINBOW.dark[k]); });
+}
 const detail = {
   rec: null, from: "records", detail: false,
   open(rec, from) {
@@ -939,63 +938,86 @@ const detail = {
     h.querySelector("h2").textContent = r.name || "측정 기록";
     h.querySelector(".tt div").textContent = `${fmtDate(r.startedAt)} · ${fmtDur(A.m.duration)}`;
   },
+  /** 간단히 ↔ 자세히: 자세히는 뒤로 가기 한 단계로 쌓아서, 뒤로 가면 간단히로 돌아온다 */
+  setDetail(on) {
+    if (on === this.detail) return;
+    this.detail = on; this.render(); $("#detailIn").scrollTop = 0;
+  },
   render() {
     const r = this.rec, A = analysisOf(r), ev = A.m.eval, box = $("#detailIn");
     charts.clear(box);
     box.innerHTML = `<div class="top" id="dHead"><button class="round-btn pop" id="dBack" aria-label="뒤로">${ICON.back}</button>
-        <div class="tt"><h2></h2><div></div></div><button class="round-btn pop" id="dEdit" aria-label="이름 변경">${ICON.edit}</button></div>
-      <div class="ai-box glass fade-in"><span class="ai-chip">${ICON.star}AI 평가</span><p>${esc(ev.overall)}</p></div>
+        <div class="tt"><h2></h2><div></div></div>
+        <button class="round-btn pop" id="dEdit" aria-label="이름 변경">${ICON.edit}</button>
+        <button class="round-btn pop del" id="dDel" aria-label="기록 삭제">${ICON.del}</button></div>
+      <div class="ai-box glass fade-in"><span class="ai-glow" aria-hidden="true"><i></i></span><span class="ai-chip">${ICON.aiStar}<span class="ai-t">AI 평가</span></span><p>${esc(ev.overall)}</p></div>
       <div id="dBody"></div>
       <div class="toggle-wrap"><button class="pill-btn ${this.detail ? "up" : ""}" id="dTog">${ICON.chev}${this.detail ? "접을래요" : "자세히 볼래요"}</button></div>`;
     this.renderHead();
+    const ai = box.querySelector(".ai-box"); if (ai) rainbowColors(ai);
     $("#dBack").onclick = () => nav.back();
     $("#dEdit").onclick = () => records.renameDlg(r.id, r.name);
-    $("#dTog").onclick = () => { this.detail = !this.detail; this.render(); $("#detailIn").scrollTop = 0; };
+    $("#dDel").onclick = () => this.remove();
+    $("#dTog").onclick = () => { if (this.detail) nav.back(); else { this.setDetail(true); nav.push("recordfull"); } };
     stagger(box);
     if (!this.detail) this.simple(A); else this.full(A);
+  },
+  async remove() {
+    const r = this.rec; if (!r) return;
+    if (!(await confirmDlg("이 기록을 삭제할까요?", "삭제한 기록은 되돌릴 수 없어요.", "삭제", "취소", true))) return;
+    await store.del(r.id);
+    for (const k of [...cache.keys()]) if (k.startsWith(r.id + ":")) cache.delete(k);
+    nav.closeRecord();
+    await records.render();
+    toast("기록을 삭제했어요.");
   },
   simple(A) {
     const m = A.m, ev = m.eval, body = $("#dBody");
     const rows = [
       { k: "acc", lbl: "가감속도", lv: m.accPeak / LEGEND.acc, n1: m.accMax.toFixed(2), n2: m.decMax.toFixed(2), u: "m/s²",
-        b: ev.acc, p: `가속 최대 ${m.accMax.toFixed(2)} · 감속 최대 ${m.decMax.toFixed(2)} m/s²` },
-      m.vibL
-        ? { k: "lat", lbl: "좌우 흔들림", lv: m.vibL.a95 / LEGEND.lat, n1: m.vibL.a95.toFixed(1), u: "gal", b: ev.vibL, p: ev.vibL.line }
-        : { k: "lat", lbl: "좌우 흔들림", lv: 0, n1: "—", u: "gal", b: { lv: 2, t: "수평 데이터가 없어요" }, p: "가져온 파일에 수평 방향 값이 없어요." },
-      { k: "spd", lbl: "속력", lv: m.speedMax / LEGEND.spd, n1: m.speedMax.toFixed(1), u: "m/min", b: ev.speed,
-        p: `상승 최고 ${m.speedUp.toFixed(1)} · 하강 최고 ${m.speedDown.toFixed(1)} m/min` },
+        b: { lv: "n", t: ev.acc.t }, p: `가속 최대 ${m.accMax.toFixed(2)} · 감속 최대 ${m.decMax.toFixed(2)} m/s²` },
+      m.vibL && m.vibL.n
+        ? { k: "lat", lbl: "좌우 흔들림", lv: m.vibL.a95 / LEGEND.latA, n1: m.vibL.a95.toFixed(1), u: "gal", b: { lv: ev.vibL.lv, t: ev.vibL.s }, p: ev.vibL.line }
+        : { k: "lat", lbl: "좌우 흔들림", lv: 0, n1: "—", u: "gal", b: { lv: "n", t: "기록이 없어요." }, p: "" },
+      { k: "spd", lbl: "속력", lv: m.speedMax / LEGEND.spd, n1: m.speedMax.toFixed(1), u: "m/min", b: ev.speed, p: "" },
     ];
     const size = Math.round(clamp(innerWidth * 0.36, 120, 160));
     body.innerHTML = `<div class="d-rows">${rows.map((r, i) => `<div class="d-row fade-in" style="animation-delay:${0.1 + i * 0.1}s">
         <div><div class="lbl">${r.lbl}</div><div id="ds-${r.k}"></div></div>
-        <div class="ev"><b class="lv${r.b.lv}">${esc(r.b.t)}</b><p>${esc(r.p)}</p></div></div>`).join("")}</div>`;
+        <div class="ev"><b class="lv${r.b.lv}">${esc(r.b.t)}</b>${r.p ? `<p>${esc(r.p)}</p>` : ""}</div></div>`).join("")}</div>`;
     rows.forEach((r, i) => {
       const s = new Sphere(r.k, size); $(`#ds-${r.k}`).appendChild(s.el);
       s.text(r.n1, r.n2 != null ? r.n2 : null, r.u).level(0);
       setTimeout(() => s.level(Math.max(r.lv, r.n1 === "—" ? 0 : 0.03)), 250 + i * 150);
     });
   },
-  /** 자세히: AI 평가 + 6가지 지표 + 그래프 (레이아웃 스케치 기준) */
+  /** 자세히: AI 평가 + 9가지 지표 + 그래프 */
   full(A) {
     const m = A.m, ev = m.eval, body = $("#dBody"), S = A.series, r = this.rec;
     const floors = Math.round(m.distance / 3);
+    const NO = "기록이 없어요.";
+    const gal = (v, g, d = 0) => (v == null ? { v: "—", u: "", e: NO, lv: -1 } : { v: v.toFixed(d), u: "gal", e: g.s, lv: g.lv });
     const cards = [
-      { l: "저크", v: m.jerkMax.toFixed(2), u: "m/s³", e: ev.jerk.s, lv: ev.jerk.lv },
-      { l: "가감속도", v2: [["가속", m.accMax.toFixed(2)], ["감속", m.decMax.toFixed(2)]], u: "m/s²", e: ev.acc.detail, e2: ev.acc.detail.split(/(?<=고) /), lv: ev.acc.lv },
-      { l: "속력", v: m.speedMax.toFixed(1), u: "m/min", e: m.speedMax <= 500 ? `${ev.speed.s} 승강기` : ev.speed.s, lv: 0 },
+      m.jerk == null ? { l: "저크", v: "—", u: "", e: NO, lv: -1 } : { l: "저크", v: m.jerk.toFixed(2), u: "m/s³", e: ev.jerk.s, lv: ev.jerk.lv },
+      { l: "가감속도", v2: [["가속", m.accMax.toFixed(2)], ["감속", m.decMax.toFixed(2)]], u: "m/s²", e2: [`가속 ${ev.acc.a}`, `감속 ${ev.acc.d}`], lv: -1 },
+      { l: "속력", v: m.speedMax.toFixed(1), u: "m/min", e: m.speedMax <= 500 ? `${ev.speed.s} 승강기` : ev.speed.s, lv: -1 },
       { l: "운행 거리", v: m.distance.toFixed(1), u: "m", e: floors >= 1 ? `건물 약 ${floors}층 높이` : "거의 움직이지 않았어요", lv: -1 },
-      { l: "상하 흔들림", v: m.vibV.a95.toFixed(1), u: "gal", e: ev.vibV.s, lv: ev.vibV.lv },
-      m.vibL ? { l: "좌우 흔들림", v: m.vibL.a95.toFixed(1), u: "gal", e: ev.vibL.s, lv: ev.vibL.lv } : { l: "좌우 흔들림", v: "—", u: "", e: "데이터 없음", lv: -1 },
+      { l: "상하 흔들림", ...(m.vibV && m.vibV.n ? { v: m.vibV.a95.toFixed(1), u: "gal", e: ev.vibV.s, lv: ev.vibV.lv } : { v: "—", u: "", e: NO, lv: -1 }) },
+      { l: "좌우 흔들림", ...(m.vibL && m.vibL.n ? { v: m.vibL.a95.toFixed(1), u: "gal", e: ev.vibL.s, lv: ev.vibL.lv } : { v: "—", u: "", e: NO, lv: -1 }) },
+      { l: "출발 거칠기", ...gal(m.start, ev.start) },
+      { l: "가감속 울렁임", ...gal(m.wave, ev.wave) },
+      { l: "도착 거칠기", ...gal(m.arrive, ev.arrive) },
     ];
-    const series = SERIES.filter(s => s.key !== "vibL" || r.lat);
+    const series = SERIES.filter(s => s.key !== "vibL" || m.vibL);
     const comment = { acc: ev.acc.s, jerk: ev.jerk.s, vibV: ev.vibV.s, vibL: ev.vibL ? ev.vibL.s : "", speed: ev.speed.s };
-    body.innerHTML = `<div class="m6">${cards.map((c, i) => `<div class="m6-card glass fade-in" style="animation-delay:${0.05 + i * 0.05}s">
+    body.innerHTML = `<div class="m6">${cards.map((c, i) => `<div class="m6-card glass fade-in" style="animation-delay:${0.05 + i * 0.04}s">
         <div class="l">${c.l}</div>
         ${c.v2 ? `<div class="v2">${c.v2.map(([k, v]) => `<div><span>${k}</span><b>${v}</b></div>`).join("")}</div><div class="u">${c.u}</div>`
                : `<div class="v">${c.v}<small>${c.u}</small></div>`}
         <div class="e ${c.e2 ? "two" : ""} ${c.lv >= 0 ? "lv" + c.lv : ""}">${c.e2 ? c.e2.map(x => `<span>${esc(x)}</span>`).join("") : esc(c.e)}</div></div>`).join("")}</div>
       <div class="charts">${series.map((s, i) => `<div class="chart-card glass fade-in" style="animation-delay:${0.1 + i * 0.08}s">
-        <div class="h"><b>${s.title}</b><span>${s.unit}</span><em>${esc(comment[s.key] || "")}</em></div><canvas class="chart" id="dc-${s.key}" style="height:180px"></canvas></div>`).join("")}</div>`;
+        <div class="h"><b>${s.title}</b><span>${s.unit}</span><em>${esc(comment[s.key] || "")}</em></div>
+        <canvas class="chart" id="dc-${s.key}" style="height:180px"></canvas></div>`).join("")}</div>`;
     series.forEach(s => new Chart($(`#dc-${s.key}`), { values: S[s.key], rate: r.rate, color: s.color, half: s.half, dec: s.dec, unit: s.unit, animate: true, tap: true, marks: s.key === "speed" ? "peak" : true, spans: (s.key === "vibV" || s.key === "vibL") && A.m.cruise.length ? A.m.cruise : null, pauses: A.m.pauses }));
   },
 };
@@ -1012,17 +1034,9 @@ const settings = {
     $("#btnTerms").onclick = () => dialog(`<h3>약관 및 데이터 안내</h3>
       <p>측정 기록은 이 기기의 브라우저 저장소에 보관돼요. 브라우저 데이터를 지우면 함께 지워져요.</p>
       <p>측정값은 휴대폰 센서로 구한 참고값이에요. 공식 승차감 검사를 대신하지 않아요.</p>
-      <p>위치는 측정한 나라를 알아내는 데만 써요. 좌표는 저장하거나 밖으로 보내지 않고, 나라 이름과 그 나라의 기준 중력값만 기록해요.</p>
       <div class="acts"><button class="solid" id="dOk">확인</button></div>`, (b, close) => { b.querySelector("#dOk").onclick = close; });
     this.renderMode();
     this.renderBaro();
-    this.renderGeo();
-    $("#geoCard").onclick = () => geo.refresh(true);
-  },
-  renderGeo() {
-    const g = geo.now;
-    $("#geoDesc").textContent = g ? `${g.name} · 기준 중력 ${g.g.toFixed(3)} m/s²`
-      : "아직 몰라요. 누르면 위치로 나라만 확인해요";
   },
   /** 개발용 기압 기록 상태 (localhost로 열었을 때만 보임) */
   renderBaro() {
@@ -1167,19 +1181,30 @@ const nav = {
   back() { if (this.stack.length > 1) history.back(); else this.apply(""); },
   onHash() {
     const h = location.hash.slice(1), st = this.stack;
-    if (st.length > 1 && st[st.length - 2] === h) st.pop();
+    const k = st.lastIndexOf(h, st.length - 2);        // 뒤로 (여러 단계 한꺼번에 돌아온 경우 포함)
+    if (k >= 0 && h !== this.top) st.length = k + 1;
     else if (h !== this.top) st.push(h);
     this.apply(h);
+  },
+  /** 기록 상세를 통째로 닫기 (자세히 단계까지 함께) */
+  closeRecord() {
+    let n = 0; for (let i = this.stack.length - 1; i > 0 && (this.stack[i] === "record" || this.stack[i] === "recordfull"); i--) n++;
+    if (n) history.go(-n); else this.apply(this.top);
   },
   /** 해시 상태를 화면에 반영 (기록 스택은 건드리지 않는다) */
   apply(h) {
     if (h !== "select" && records.selecting) records.setSelecting(null);
-    if (h !== "record" && h !== "help" && this.overlay) this.hideSheet();
+    if (h !== "record" && h !== "recordfull" && h !== "help" && this.overlay) this.hideSheet();
     if (h === "" ) return this.showPage(1);
     if (h === "records") return this.showPage(0);
     if (h === "settings") return this.showPage(2);
     if (h === "select") { if (!records.selecting) this.replace("records"); return; }
-    if (h === "record") { if (detail.rec) this.showSheet("record"); else this.replace(this.page === 0 ? "records" : ""); return; }
+    if (h === "record" || h === "recordfull") {
+      if (!detail.rec) { this.replace(this.page === 0 ? "records" : ""); return; }
+      if (this.overlay !== "record") this.showSheet("record");
+      detail.setDetail(h === "recordfull");      // 자세히에서 뒤로 가면 간단히로
+      return;
+    }
     if (h === "help") { if (this.overlay !== "help") { help.build(); help.go(0); this.showSheet("help"); } }
   },
   /** 탭·스와이프로 쪽 이동: 홈 ↔ 한 단계(기록 관리/설정) */
@@ -1201,6 +1226,7 @@ const nav = {
     const changed = i !== this.page;
     this.page = i; this.place();
     ["#navRecords", "#navHome", "#navSettings"].forEach((s, k) => $(s).classList.toggle("on", k === i));
+    ["#pRecords", "#pHome", "#pSettings"].forEach((s, k) => { const el = $(s); if (el) el.classList.toggle("cur", k === i); });
     this.moveOrb();
     if (changed) {
       stagger($(["#pRecords", "#pHome", "#pSettings"][i]));
@@ -1216,13 +1242,40 @@ const nav = {
     this.overlay = kind;
     const el = kind === "help" ? $("#sHelp") : $("#sDetail");
     el.classList.add("open"); el.setAttribute("aria-hidden", "false");
+    document.body.classList.add("sheet-open");
   },
   hideSheet() {
     const kind = this.overlay; if (!kind) return;
     this.overlay = null;
     const el = kind === "help" ? $("#sHelp") : $("#sDetail");
     el.classList.remove("open"); el.setAttribute("aria-hidden", "true");
+    document.body.classList.remove("sheet-open");
     if (kind === "record" && detail.from === "home") ctl.needDisturb = false;
+  },
+};
+
+/* ───────── 오래 켜 둔 화면 되살리기 (2026-11-25) ─────────
+   휴대폰에서 같은 화면을 오래 두면(화면 꺼짐·백그라운드·주소창 높이 변화) 브라우저가 캔버스를 비우거나 크기가 바뀐 채로 남아
+   구슬 크기·쪽 위치·그래프가 어긋날 수 있다. 화면이 다시 보일 때, 크기가 바뀔 때, 그리고 1분마다 배치를 다시 맞춘다. */
+const heal = {
+  w: 0, h: 0, hiddenAt: 0, t: null,
+  init() {
+    this.w = innerWidth; this.h = innerHeight;
+    document.addEventListener("visibilitychange", () => {
+      if (document.hidden) { this.hiddenAt = performance.now(); return; }
+      this.run(performance.now() - this.hiddenAt > 30000);
+    });
+    addEventListener("pageshow", e => { if (e.persisted) this.run(true); });
+    addEventListener("resize", () => { clearTimeout(this.t); this.t = setTimeout(() => this.run(false), 250); });
+    setInterval(() => { if (!document.hidden) this.run(false); }, 60000);
+  },
+  run(force) {
+    const resized = Math.abs(innerWidth - this.w) > 40 || Math.abs(innerHeight - this.h) > 80;
+    this.w = innerWidth; this.h = innerHeight;
+    nav.place(); nav.moveOrb();
+    if ((force || resized) && ctl.state !== "measure") { home.layout = ""; home.render(); }
+    charts.redrawAll();
+    ctl.dirty = true;
   },
 };
 
@@ -1258,7 +1311,6 @@ const installer = {
   await store.open();
   settings.init();
   ctl.init();
-  geo.init();
   baro.connectBridge();
   glassGuard.check();
   nav.init();
@@ -1266,6 +1318,7 @@ const installer = {
   records.render();
   stagger($(".nav")); stagger($("#pHome"));
   installer.init();
+  heal.init();
   $("#btnImport").onclick = () => $("#fileIn").click();
   addEventListener("resize", () => nav.moveOrb());
   requestAnimationFrame(() => { $("#navOrb").classList.add("ready"); nav.moveOrb(); });

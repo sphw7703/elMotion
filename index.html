@@ -226,6 +226,7 @@ canvas.chart { display: block; width: 100%; height: 150px; touch-action: pan-y; 
 .d-row .lbl { font-size: 12.5px; font-weight: 800; color: var(--ink-2); text-align: center; margin-bottom: 4px; }
 .d-row .ev b { display: block; font-size: 17px; font-weight: 800; margin-bottom: 4px; letter-spacing: -.3px; }
 .d-row .ev p { margin: 0; font-size: 13px; color: var(--ink-2); line-height: 1.5; }
+.lvn { color: var(--ink); }   /* 성격(가감속 세기 등): 좋고 나쁨이 아니라 색 없이 */
 .d-row .ev .hint { font-size: 11.5px; color: var(--ink-3); margin-top: 4px; }
 .lv0 { color: #1E8C5C; } .lv1 { color: #2E8B3E; } .lv2 { color: #A87800; } .lv3 { color: #C9580E; } .lv4 { color: #C53030; }
 :root[data-ui="dark"] .lv0 { color: #5FD3A2; } :root[data-ui="dark"] .lv1 { color: #8CD99A; } :root[data-ui="dark"] .lv2 { color: #F2C94C; } :root[data-ui="dark"] .lv3 { color: #F5A15A; } :root[data-ui="dark"] .lv4 { color: #F08484; }
@@ -274,8 +275,12 @@ canvas.chart { display: block; width: 100%; height: 150px; touch-action: pan-y; 
 .ai-box p { margin: 0; font-size: 16px; font-weight: 800; letter-spacing: -.3px; line-height: 24px; word-break: keep-all; text-wrap: pretty; }
 .ai-box .ai-chip { margin-top: -3px; }  /* 첫 줄 높이에 맞춤, 둘째 줄부터는 첫 줄 글자 시작점에 맞춤 */
 .ai-chip { flex: none; display: inline-flex; align-items: center; gap: 5px; height: 30px; padding: 0 11px; border-radius: 999px; background: var(--accent); color: var(--on-accent); font-size: 12.5px; font-weight: 800; }
-.ai-chip svg { width: 14px; height: 14px; }
+.ai-chip .ai-star { width: 14px; height: 14px; flex: none; }   /* 별(파티클): 별 모양에 맞춘 틀이라 가운데가 옆 글자 가운데와 맞는다 */
+.ai-chip .ai-t { line-height: 1; }
 .m6 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.round-btn.del { color: #fff; background: var(--danger); border-color: transparent; }
+/* 보이지 않는 쪽·시트 아래의 물결은 멈춘다 (오래 켜 둘 때 그래픽 부담을 줄임) */
+.page:not(.cur) .sphere .w1, .page:not(.cur) .sphere .wl, body.sheet-open #pHome .sphere .w1, body.sheet-open #pHome .sphere .wl { animation-play-state: paused; }
 .m6-card { padding: 11px 10px 10px; border-radius: 14px; display: flex; flex-direction: column; min-height: 104px; }
 .m6-card .l { font-size: 12px; font-weight: 800; color: var(--ink-2); }
 .m6-card .v { font-size: 20px; font-weight: 800; letter-spacing: -.5px; margin-top: 6px; font-variant-numeric: tabular-nums; line-height: 1.1; }
@@ -311,13 +316,14 @@ canvas.chart { display: block; width: 100%; height: 150px; touch-action: pan-y; 
   --page-bg: radial-gradient(120% 60% at 15% 0%, #FFFFFF 0%, rgba(255,255,255,0) 60%), radial-gradient(90% 50% at 100% 100%, #D3DBEA 0%, rgba(211,219,234,0) 70%), linear-gradient(180deg, #F2F4F9 0%, #E2E7F0 100%);
 }
 :root[data-ui="dark"] {
-  --bg: #080D1D; --surface: rgba(255,255,255,.055); --surface-2: rgba(255,255,255,.09); --sheet: #0A1022;
+  --bg: #0A0E1B; --surface: rgba(255,255,255,.055); --surface-2: rgba(255,255,255,.09); --sheet: #0C1120;
   --ink: #EEF2FF; --ink-2: #A6B0CC; --ink-3: #6B7594; --line: rgba(255, 255, 255, .08);
   --accent: #FFFFFF; --on-accent: #141C38; --hi: #5B8CFF;
   --navy-grad: linear-gradient(160deg, #FFFFFF 0%, #E4EAF7 100%);
   --glass-border: rgba(255,255,255,.10);
   --glass-shadow: inset 0 1px 0 rgba(255,255,255,.07), 0 20px 44px -20px rgba(0,0,0,.7);
-  --page-bg: radial-gradient(70% 40% at 0% 0%, rgba(46, 86, 220, .35) 0%, rgba(46,86,220,0) 70%), radial-gradient(60% 35% at 100% 70%, rgba(59, 123, 255, .18) 0%, rgba(59,123,255,0) 70%), linear-gradient(180deg, #0B1228 0%, #070B18 100%);
+  /* 2026-11-25: 채도만 20% 낮춤 (예전 #0B1228·#070B18, 푸른 빛 2E56DC·3B7BFF) */
+  --page-bg: radial-gradient(70% 40% at 0% 0%, rgba(63, 95, 203, .35) 0%, rgba(63,95,203,0) 70%), radial-gradient(60% 35% at 100% 70%, rgba(79, 130, 235, .18) 0%, rgba(79,130,235,0) 70%), linear-gradient(180deg, #0E1325 0%, #090C16 100%);
 }
 body { background: var(--page-bg); background-attachment: fixed; }
 .sheet .bgfill { background: var(--page-bg); }
@@ -332,6 +338,51 @@ body { background: var(--page-bg); background-attachment: fixed; }
 .ai-chip { background: var(--navy-grad); color: var(--on-accent); box-shadow: 0 6px 16px -6px rgba(27,42,99,.6); }
 :root[data-ui="dark"] .ai-chip { box-shadow: 0 0 18px -4px rgba(91,140,255,.7); }
 .m6-card, .chart-card, .rec-card, .ai-box { border-radius: 22px; }
+/* AI 평가 (2026-11-25 사용자 확정): 레퍼런스(빛나는 유리 구슬)의 색과 질감
+   · 칩(타원): 유리 안에서 번진 색 덩어리가 천천히 소용돌이치고, 윗면 광택 + 가는 빛 테두리 + 바깥으로 번지는 빛
+   · 상자: 가는 무지개 테두리가 빙글 돌고, 그 테두리가 안팎으로 은은하게 번진다. 유리 안쪽 구석에 옅은 색이 비친다
+   색은 모드별 레퍼런스에서 뽑은 6색 — 라이트: 서리 유리 구슬의 파스텔 / 다크: 어둠 속에 빛나는 장밋빛·보랏빛·얼음빛
+   순서는 기록을 열 때마다 무작위 (app.js가 --l1~6, --d1~6을 채운다) */
+.ai-box { --l1: #F4C6D7; --l2: #F7D2B0; --l3: #EEE9A6; --l4: #A9E8C4; --l5: #86D6E2; --l6: #C9C6F2;
+  --d1: #F2A7BE; --d2: #F0A6E6; --d3: #B39AF0; --d4: #7684E6; --d5: #A9DDF3; --d6: #FFD6E5;
+  --c1: var(--l1); --c2: var(--l2); --c3: var(--l3); --c4: var(--l4); --c5: var(--l5); --c6: var(--l6); }
+:root[data-ui="dark"] .ai-box { --c1: var(--d1); --c2: var(--d2); --c3: var(--d3); --c4: var(--d4); --c5: var(--d5); --c6: var(--d6); }
+@property --ai-a { syntax: "<angle>"; initial-value: 0deg; inherits: false; }
+@keyframes aiSpin { to { --ai-a: 360deg; } }
+@keyframes aiSwirl { to { transform: translate(-50%, -50%) rotate(360deg); } }
+
+/* 칩: 유리 구슬 */
+.ai-box .ai-chip { position: relative; overflow: hidden; isolation: isolate; color: #141C38; background: #F4F2FB;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .75), 0 0 0 .5px color-mix(in srgb, var(--c6) 70%, transparent),
+    -6px 2px 14px -6px color-mix(in srgb, var(--c1) 90%, transparent), 6px 3px 14px -6px color-mix(in srgb, var(--c5) 90%, transparent); }
+.ai-box .ai-chip::before { content: ""; position: absolute; z-index: -2; left: 50%; top: 50%; width: 150px; aspect-ratio: 1; transform: translate(-50%, -50%);
+  background: radial-gradient(circle at 28% 32%, var(--c1) 0 12%, transparent 34%), radial-gradient(circle at 72% 30%, var(--c2) 0 10%, transparent 32%),
+    radial-gradient(circle at 70% 70%, var(--c5) 0 12%, transparent 34%), radial-gradient(circle at 30% 72%, var(--c4) 0 10%, transparent 32%),
+    radial-gradient(circle at 50% 50%, var(--c6) 0 14%, transparent 40%), radial-gradient(circle at 50% 12%, var(--c3) 0 8%, transparent 28%);
+  filter: blur(7px) saturate(115%); opacity: .95; animation: aiSwirl 9s linear infinite; }
+.ai-box .ai-chip::after { content: ""; position: absolute; inset: 0; z-index: -1; border-radius: inherit; pointer-events: none;
+  background: linear-gradient(180deg, rgba(255, 255, 255, .62) 0%, rgba(255, 255, 255, .12) 48%, rgba(255, 255, 255, 0) 60%, rgba(255, 255, 255, .25) 100%); }
+:root[data-ui="dark"] .ai-box .ai-chip { color: #fff; background: #191428; text-shadow: 0 0 6px rgba(255, 220, 245, .55);
+  box-shadow: inset 0 0 0 1px rgba(255, 225, 245, .55), inset 0 0 8px rgba(255, 210, 240, .35),
+    -6px 0 16px -5px color-mix(in srgb, var(--c1) 75%, transparent), 6px 2px 16px -5px color-mix(in srgb, var(--c4) 80%, transparent); }
+:root[data-ui="dark"] .ai-box .ai-chip::before { opacity: .85; filter: blur(6px) saturate(120%); }
+:root[data-ui="dark"] .ai-box .ai-chip::after { background: linear-gradient(180deg, rgba(255, 255, 255, .28) 0%, rgba(255, 255, 255, 0) 45%, rgba(0, 0, 0, 0) 70%, rgba(255, 255, 255, .12) 100%); }
+
+/* 상자: 빛나는 무지개 테두리 */
+.ai-box.glass { position: relative; isolation: isolate; border-color: transparent;
+  background: radial-gradient(90% 120% at 100% 100%, color-mix(in srgb, var(--c5) 16%, transparent), transparent 60%),
+    radial-gradient(70% 90% at 0% 0%, rgba(255, 255, 255, .5), transparent 60%), var(--surface); }
+:root[data-ui="dark"] .ai-box.glass { background: radial-gradient(90% 120% at 100% 100%, color-mix(in srgb, var(--c3) 14%, transparent), transparent 60%),
+    radial-gradient(70% 90% at 0% 0%, color-mix(in srgb, var(--c1) 10%, transparent), transparent 60%), var(--surface); }
+.ai-box.glass::before, .ai-glow i { content: ""; position: absolute; inset: -1px; border-radius: inherit; pointer-events: none;
+  background: conic-gradient(from var(--ai-a), var(--c1), var(--c2), var(--c3), var(--c4), var(--c5), var(--c6), var(--c1));
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite: xor; mask-composite: exclude;
+  animation: aiSpin 6s linear infinite; }
+.ai-box.glass::before { padding: 1.5px; z-index: -1; }
+.ai-glow { position: absolute; inset: 0; border-radius: inherit; z-index: -2; pointer-events: none; filter: blur(7px); opacity: .9; }
+.ai-glow i { padding: 4px; }
+:root[data-ui="dark"] .ai-glow { opacity: .75; filter: blur(9px); }
+@media (prefers-reduced-motion: reduce) { .ai-box .ai-chip::before, .ai-box.glass::before, .ai-glow i { animation: none; } }
 .ic-btn { border-radius: 50%; }
 .seg { border-radius: 999px; background: var(--surface-2); padding: 4px; }
 .seg button { border-radius: 999px; }
@@ -354,7 +405,7 @@ body { background: var(--page-bg); background-attachment: fixed; }
 .nav-orb { position: absolute; left: 0; top: -19px; width: 66px; height: 66px; border-radius: 50%; background: var(--navy-grad); pointer-events: none; z-index: 0;
   box-shadow: 0 0 0 5px var(--bg), 0 14px 28px -8px rgba(27,42,99,.6); opacity: 0; }
 .nav-orb.ready { opacity: 1; transition: transform .5s cubic-bezier(.3,1.25,.45,1), opacity .2s; }
-:root[data-ui="dark"] .nav-orb { box-shadow: 0 0 0 5px #0A1022, 0 0 28px -2px rgba(91,140,255,.65); }
+:root[data-ui="dark"] .nav-orb { box-shadow: 0 0 0 5px #0C1120, 0 0 28px -2px rgba(91,140,255,.65); }
 .nav button img { transition: filter .3s, opacity .3s, transform .5s cubic-bezier(.3,1.25,.45,1); }
 .nav button.on img { transform: translateY(-21px) scale(1.06); }
 .toast { width: max-content; max-width: calc(100vw - 32px); text-align: center; word-break: keep-all; font-size: 14px; color: var(--ink); border-radius: 999px; padding: 12px 18px; background: rgba(255,255,255,.88); border: 1px solid var(--glass-border); box-shadow: var(--glass-shadow);
@@ -416,10 +467,6 @@ body.selecting #recList { padding-bottom: 150px; }
     radial-gradient(ellipse 26% 15% at 38% 21%, rgba(255, 255, 255, .55), transparent 70%),
     radial-gradient(ellipse 47.6% 46% at 50% 49.8%, var(--gf-body) 0 86%, var(--gf-rim) 95%, var(--gf-edge) 99%, transparent 100%); }
 :root.no-glass .sphere .glass-top, :root.no-glass .mini::after { background: radial-gradient(ellipse 26% 15% at 38% 21%, rgba(255, 255, 255, .5), transparent 70%); }
-
-/* 측정 나라 카드 (누르면 위치로 나라 다시 확인) */
-.geo-card { display: block; width: 100%; text-align: left; font: inherit; color: inherit; cursor: pointer; }
-.geo-card svg { flex: none; width: 30px; height: 30px; padding: 7px; border-radius: 50%; background: var(--navy-grad); color: var(--on-accent); }
 </style>
 </head>
 <body>
@@ -468,12 +515,6 @@ body.selecting #recList { padding-bottom: 150px; }
             <div class="seg" id="modeSeg"><span class="thumb"></span><button data-mode="auto">자동</button><button data-mode="manual">수동</button></div>
           </div>
         </div>
-        <button class="set-card glass geo-card" id="geoCard" type="button">
-          <div class="set-row">
-            <div class="t"><h3 style="margin:0">측정 나라</h3><p id="geoDesc"></p></div>
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M9 6l6 6-6 6"/></svg>
-          </div>
-        </button>
         <div class="set-card glass" id="baroCard" hidden>
           <div class="set-row">
             <div class="t"><h3 style="margin:0">기압 기록 (개발용)</h3><p id="baroDesc"></p></div>
@@ -501,7 +542,7 @@ body.selecting #recList { padding-bottom: 150px; }
 
 <div class="dlg-back" id="dlgBack" hidden><div class="dlg" id="dlg" role="dialog" aria-modal="true"></div></div>
 <div class="toast glass" id="toast" role="status"></div>
-<input type="file" id="fileIn" accept=".csv,text/csv" multiple hidden>
+<input type="file" id="fileIn" accept=".csv,text/csv,.txt,text/plain" multiple hidden>
 
 <script src="core.js"></script>
 <script src="app.js"></script>
