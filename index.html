@@ -105,9 +105,12 @@ button:focus-visible, [tabindex]:focus-visible, input:focus-visible { outline: 2
 .live-pill i { width: 8px; height: 8px; border-radius: 50%; background: var(--danger); animation: blink 1.2s infinite; }
 @keyframes blink { 50% { opacity: .25; } }
 .home-body { flex: 1; display: flex; flex-direction: column; align-items: center; }
-.single { display: flex; flex-direction: column; align-items: center; justify-content: center; flex: 1; gap: 20px; min-height: 380px; }
-.single .caption { font-size: 19px; font-weight: 800; letter-spacing: -.3px; min-height: 28px; text-align: center; }
-.single .sub { font-size: 13.5px; color: var(--ink-2); text-align: center; max-width: 280px; margin-top: -10px; }
+.single { position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; flex: 1; min-height: 380px; }
+.single .cap-wrap { display: flex; flex-direction: column; align-items: center; gap: 10px; }
+.single .caption { font-size: 28px; font-weight: 800; letter-spacing: -.6px; line-height: 1.3; min-height: 36px; text-align: center; word-break: keep-all; }
+.single .sub { font-size: 15px; color: var(--ink-2); text-align: center; max-width: 290px; word-break: keep-all; }
+.single .home-actions { position: absolute; left: 0; right: 0; top: 100%; margin-top: 18px; }
+.single .cap-wrap { position: relative; }
 .triple { width: 100%; display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 0 0 8px; }
 .triple .item { display: flex; flex-direction: column; align-items: center; gap: 4px; }
 .triple .lbl { font-size: 13px; font-weight: 700; color: var(--ink-2); }
@@ -522,7 +525,7 @@ body.selecting #recList { padding-bottom: 150px; }
         </div>
         <button class="row-btn glass" id="btnInstall" hidden>앱으로 설치하기 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M9 6l6 6-6 6"/></svg></button>
         <button class="row-btn glass" id="btnTerms">약관 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M9 6l6 6-6 6"/></svg></button>
-        <p class="copy">© Copyright. 로엔 (2026). All rights reserved.</p>
+        <p class="copy">elMotion <span id="appVer"></span><br>© Copyright. 로엔 (2026). All rights reserved.</p>
       </section>
     </div>
   </div>

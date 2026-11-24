@@ -3,6 +3,8 @@
 
 /* ───────── 상수 ───────── */
 const FS = Core.FS;
+/* 앱 버전 (2026-11-25 사용자 확정): 0.큰 기능 묶음.고친 횟수 — 웹 앱 확정 때 1.0.0, 안드로이드 앱 때 2.0.0 */
+const APP_VERSION = "0.9.4";
 const LEGEND = { acc: 1.5, lat: 30, latA: 20, spd: 600 };   // 물 높이 범례 (화면에 표시하지 않음). lat: 실시간 p-p, latA: 기록의 |A95|
 const CUT = Math.round(Core.P.CUT_SEC * FS);
 const CUT_MANUAL = Math.round(0.3 * FS);   // 수동 모드 종료 시 버려지는 마지막 0.3초
@@ -637,9 +639,10 @@ const home = {
     const body = $("#homeBody"); charts.clear(body); body.innerHTML = "";
     this.big = this.trip = null; this.liveCharts = [];
     if (kind === "single") {
-      const size = Math.round(clamp(Math.min(innerWidth * 0.68, innerHeight * 0.36), 200, 290));
-      body.innerHTML = `<div class="single fade-in"><div id="bigSlot"></div><div class="caption" id="cap"></div><div class="sub" id="capSub"></div><div id="capBtns" class="home-actions"></div></div>`;
-      this.big = new Sphere("acc", size); $("#bigSlot").appendChild(this.big.el); this.big.quick(true).level(0);
+      // 측정 대기·안정화: 원형 게이지 없이 글자만 화면 한가운데에 (2026-11-25 사용자 요청)
+      body.innerHTML = `<div class="single fade-in"><div class="cap-wrap" id="capWrap"><div class="caption" id="cap"></div><div class="sub" id="capSub"></div><div id="capBtns" class="home-actions"></div></div></div>`;
+      this.big = true; this.capDy = 0;
+      requestAnimationFrame(() => this.centerCaption());
     } else if (kind === "live-simple") {
       const avail = innerHeight - 60 - 70 - 110 - 3 * 30;
       const size = Math.round(clamp(avail / 3, 104, 176));
@@ -655,6 +658,13 @@ const home = {
         <div class="charts">${SERIES.map((s, i) => `<div class="chart-card glass fade-in" style="animation-delay:${0.1 + i * 0.08}s"><div class="h"><b>${s.title}</b><span>${s.unit}</span><em id="lv-${s.key}"></em></div><canvas class="chart" id="lc-${s.key}"></canvas></div>`).join("")}</div>`;
       this.liveCharts = SERIES.map(s => new Chart($(`#lc-${s.key}`), { values: [], rate: FS, color: s.color, half: s.half, dec: s.dec, unit: s.unit, window: LIVE_WIN }));
     }
+  },
+  /** 대기 문구의 가운데를 화면 정가운데에 맞춘다 (위쪽 머리 높이만큼 내려가 있는 것을 끌어올림) */
+  centerCaption() {
+    const w = $("#capWrap"), c = $("#cap"); if (!w || !c || !w.offsetParent) return;
+    const prev = this.capDy || 0, r = c.getBoundingClientRect();
+    const dy = Math.round(innerHeight / 2 - (r.top + r.height / 2 - prev));
+    if (dy !== prev) { this.capDy = dy; w.style.transform = `translateY(${dy}px)`; }
   },
   updateSingle() {
     if (!this.big) return;
@@ -673,6 +683,7 @@ const home = {
       const bd = $("#bDemo"); if (bd) bd.onclick = () => ctl.startDemo();
       const bs = $("#bStart"); if (bs) bs.onclick = () => { if (ctl.sensorOk === false && !ctl.demo) return; ctl.state = "wait"; ctl.stab.reset(); home.render(); };
     }
+    this.centerCaption();
   },
   renderActions() {
     const measuring = ctl.state === "measure", ph = measuring ? ctl.phase : "";
@@ -721,7 +732,7 @@ const home = {
   },
   tick() {
     if (!ctl.dirty) return; ctl.dirty = false;
-    if (ctl.state !== "measure") { if (this.big) { this.big.level(ctl.progress); this.updateSingle(); } return; }
+    if (ctl.state !== "measure") { if (this.big) this.updateSingle(); return; }
     const o = ctl.o, sec = ctl.vert.length / FS;
     const lbl = ctl.phase === "pause" ? "일시정지" : ctl.phase === "calib" ? "보정 중" : "측정 중";
     $("#liveTime").textContent = `${lbl} ${Math.floor(sec / 60)}:${p2(Math.floor(sec % 60))}`;
@@ -1272,7 +1283,7 @@ const heal = {
   run(force) {
     const resized = Math.abs(innerWidth - this.w) > 40 || Math.abs(innerHeight - this.h) > 80;
     this.w = innerWidth; this.h = innerHeight;
-    nav.place(); nav.moveOrb();
+    nav.place(); nav.moveOrb(); home.centerCaption();
     if ((force || resized) && ctl.state !== "measure") { home.layout = ""; home.render(); }
     charts.redrawAll();
     ctl.dirty = true;
@@ -1306,10 +1317,11 @@ const installer = {
    ════════════════════════════════════════════════════════════════ */
 (async () => {
   theme.apply();
-  if (document.fonts) document.fonts.ready.then(() => charts.redrawAll());
+  if (document.fonts) document.fonts.ready.then(() => { charts.redrawAll(); home.centerCaption(); });
   if (theme.mq) theme.mq.addEventListener("change", () => { if (theme.pref === "system") theme.apply(); });
   await store.open();
   settings.init();
+  { const v = $("#appVer"); if (v) v.textContent = APP_VERSION; }
   ctl.init();
   baro.connectBridge();
   glassGuard.check();
