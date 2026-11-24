@@ -425,15 +425,30 @@
         if (!(moving[r - 1] && !moving[r]) || !snaps.has(r)) continue;
         let a = r - 1; while (a > s && moving[a - 1]) a--;
         while (a > s && S.speed[a - 1] !== 0) a--;            // 움직이기 시작한 첫 순간까지
-        zupt.push([a, r, snaps.get(r).v]);
+        zupt.push([a, r, snaps.get(r).v, s]);
       }
       if (e > s) distOff = S.dist[e - 1];
     }
-    /* 정지 시점 되짚기 (2026-11-24 사용자 확정): 엘리베이터는 출발 전·도착 후 반드시 속력 0.
-       도착 순간 남은 속력을 운행 시간에 비례해 거꾸로 나눠 빼서 운행 전체의 속력을 바로잡는다. */
-    for (const [a, r, vres] of zupt) {
+    /* 운행 속력 다시 계산 (2026-11-24 실측 검증 후 사용자 확정): 출발 직전 영점 + 운행 전체 적분 + 정지 시점 되짚기
+       · 출발 직전 1초(멈춰 있던 때)의 평균을 영점으로 다시 잡는다
+       · 정속 주행 중에도 적분을 멈추지 않는다 (멈추면 속력을 조금씩 잃어 거리가 약 1.6% 짧게 나왔다)
+       · 도착해 멈춘 순간 남은 속력을 운행 시간에 비례해 거꾸로 나눠 뺀다 (엘리베이터는 출발 전·도착 후 반드시 속력 0)
+       월계삼창 1→10층(정격 60 m/min) 실측: 편도 거리 오차 평균 0.8%, 정속 속력 60.0±0.7 m/min.
+       정지로 끝나지 않은 운행(일시정지·측정 종료로 잘림)은 기존 계산을 그대로 쓴다. */
+    let prevEnd = -1;
+    for (const [a, r, vres, gs] of zupt) {
       const L = r - a; if (L < 2) continue;
-      for (let k = a; k < r; k++) S.speed[k] -= vres * 60 * (k - a + 1) / L;
+      const z0 = Math.max(gs, prevEnd, a - Math.round(fs));
+      prevEnd = r;
+      if (a - z0 < Math.round(0.3 * fs)) {                        // 출발 전 멈춰 있던 시간이 너무 짧으면: 기존 속력에 되짚기만
+        for (let k = a; k < r; k++) S.speed[k] -= vres * 60 * (k - a + 1) / L;
+        continue;
+      }
+      let b0 = 0; for (let i = z0; i < a; i++) b0 += vert[i]; b0 /= (a - z0);
+      let v = 0; const raw = new Float64Array(L);
+      for (let k = a; k < r; k++) { v += (vert[k] - b0) / fs; raw[k - a] = v * 60; }
+      const res = raw[L - 1];
+      for (let k = a; k < r; k++) S.speed[k] = raw[k - a] - res * (k - a + 1) / L;
     }
     if (zupt.length) { let d = 0; for (let i = 0; i < n; i++) { d += Math.abs(S.speed[i]) / 60 / fs; S.dist[i] = d; } }
 
@@ -681,7 +696,7 @@
      흔들림(A95): ~8 아주 훌륭, ~10 좋음, ~20 일반적, ~30 좋지 않음, 그 이상 불쾌
      가감속 모양(가감속도+저크+가가가속도): 내부 점수 → 등급(훌륭/좋아요/무난/아쉬워요/점검) + 한마디 평
      속력: ~70 저속, ~130 중속, ~250 고속, ~500 초고속, 그 이상 '초고속의 초월' */
-  const EVAL_VER = 17;
+  const EVAL_VER = 18;
   function accGrade(a) {
     if (a <= 0.4) return { lv: 0, t: "거의 느껴지지 않을 만큼 순해요", s: "순해요" };
     if (a <= 0.7) return { lv: 1, t: "부드러워요", s: "부드러워요" };
@@ -811,7 +826,7 @@
       · 운행마다 기압 높이(h)를 가속도 높이(z)에 h ≈ α·z + β 로 맞춰 보고,
         α가 0.85~1.15 밖이거나(이동 높이 차 15% 이상) 맞춘 뒤에도 기압이 튀면(잔차가 크면) 그 운행은 기압을 쓰지 않는다
       · 초고속(500 m/min 초과)은 카 안 기압을 조절하기도 해서 쓰지 않는다
-      · 통과하면 높이 비율은 가속도와 기압의 중간(√α)으로 맞추고, 운행 중 느리게 쌓이는 오차를 기압으로 바로잡는다 */
+      · 통과하면 높이 비율은 가속도를 믿고(α로 맞춤), 운행 중 느리게 쌓이는 오차의 모양만 기압으로 바로잡는다 */
   function baroRefine(speed, fs, baro, spans) {
     const n = speed.length;
     const res = { speed: Float32Array.from(speed), used: 0, total: 0, reasons: [] };
@@ -838,22 +853,23 @@
       const rms = Math.sqrt(rss / X.length);
       if (!(al >= 0.85 && al <= 1.15)) { res.reasons.push("이동 높이 불일치"); continue; }
       if (rms > Math.max(0.4, 0.05 * Math.abs(dz))) { res.reasons.push("기압이 튐"); continue; }
-      // 통과: 높이 비율은 가속도(되짚기 후)와 기압(승강로 공기 온도에 따라 몇 % 틀어짐)의 중간으로 맞추고(÷√α),
-      // 60 Hz로 이어 둘의 속력 차이(느리게 변하는 오차)만 빼 준다
-      const sc = Math.sqrt(al), hz = new Float64Array(r - a); let j = 0;
+      // 통과: 높이 비율은 가속도를 믿고(÷α — 기압은 승강로 공기 온도에 따라 2~5% 높게 나옴, 월계삼창 실측),
+      // 60 Hz로 이어 둘의 속력 차이(운행 중 느리게 변하는 오차의 모양)만 빼 준다
+      const sc = al, hz = new Float64Array(r - a); let j = 0;
       for (let i = a; i < r; i++) {
         const t = i / fs; while (j < idx.length - 2 && bt[idx[j + 1]] < t) j++;
         const k0 = idx[j], k1 = idx[Math.min(j + 1, idx.length - 1)];
         const h = bt[k1] > bt[k0] ? bh[k0] + (bh[k1] - bh[k0]) * clamp01((t - bt[k0]) / (bt[k1] - bt[k0])) : bh[k0];
         hz[i - a] = (h - be) / sc;
       }
-      // 운행 중 기압이 튀었는지: 1초 간격으로 잰 기압 속력과 가속도 속력의 차이
-      { const W = Math.round(0.5 * fs); let worst = 0;
+      // 운행 중 기압이 튀었는지: 3초 간격으로 잰 기압 속력과 가속도 속력의 차이
+      // (2026-11-24 월계삼창 실측: 기압계 잡음만으로도 1초 창은 13 m/min까지 벌어짐, 3초 창은 10 m/min 안 → 3초 창·15 m/min)
+      { const W = Math.round(1.5 * fs); let worst = 0;
         for (let i = a + W; i < r - W; i++) {
           const vb = (hz[i - a + W] - hz[i - a - W]) / (2 * W / fs) * 60, va = (z[i - a + W + 1] - z[i - a - W + 1]) / (2 * W / fs) * 60;
           worst = Math.max(worst, Math.abs(vb - va));
         }
-        if (worst > Math.max(12, 0.15 * pk)) { res.reasons.push("기압이 튐"); continue; } }
+        if (worst > Math.max(15, 0.2 * pk)) { res.reasons.push("기압이 튐"); continue; } }
       const fA1 = Biquad.make(0.4, fs, false), fA2 = Biquad.make(0.4, fs, false), fB1 = Biquad.make(0.4, fs, false), fB2 = Biquad.make(0.4, fs, false);
       const k = 1 / (3 * fs); let prev = null, err = 0;
       // 필터 시작 흔들림을 줄이려고 첫 값으로 채운 뒤 시작

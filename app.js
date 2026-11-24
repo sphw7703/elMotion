@@ -335,6 +335,8 @@ const baro = {
   },
   start(t0) {
     this.samples = []; this.t0 = t0; this.paused = false; this.recSec = 0; this.rec = false;
+    // 중계기 주소(localhost)로 열었으면, 측정을 시작할 때 아직 연결 전이어도 연결되는 순간부터 기압을 함께 기록한다
+    if (this.es && typeof window.PressureSensor !== "function" && prefs.get("baro", "on") === "on") { this.rec = true; return; }
     if (!this.on) return;
     if (this.source === "bridge") { this.rec = true; return; }
     try {
