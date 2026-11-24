@@ -300,15 +300,15 @@ const SERIES = [
 
 /* ───────── 기록 저장소 (IndexedDB) ───────── */
 const cache = new Map();
-/* 기압계: 웹 브라우저에는 아직 기압 센서 API가 없어(크롬 포함) 대부분 '사용 불가'로 자동 비활성화된다.
-   · 앞으로 PressureSensor가 생기거나 안드로이드 앱으로 옮기면 같은 코드로 바로 동작한다.
-   · 시험용: 안드로이드 휴대폰의 Termux에서 tools/baro_bridge.py를 돌리고 http://localhost:8080 으로 열면
-     중계기가 휴대폰 기압계 값을 /baro 로 흘려 준다 (EventSource). */
+/* 기압계: 개발용 기준 측정 (2026-11-24 사용자 확정 — 계산에는 쓰지 않는다)
+   실측해 보니 기압 보정의 이득은 0.5% 남짓이고 승강로 공기 온도에 따라 비율이 ±2~4% 흔들려, 앱의 보정에서는 뺐다.
+   개발할 때 정답 비교용으로만: 안드로이드 Termux에서 tools/baro_bridge.py를 돌리고 http://localhost:8080 으로 열면
+   측정할 때 기압을 함께 기록해 CSV(pressure_hpa 열)로 내보낸다. github.io 등 일반 주소에서는 아무것도 하지 않는다. */
 const baro = {
   bridgeOk: false, live: null, liveAt: 0, rec: false,
-  get supported() { return typeof window.PressureSensor === "function" || this.bridgeOk; },
-  get on() { return this.supported && prefs.get("baro", "on") === "on"; },
-  get source() { return typeof window.PressureSensor === "function" ? "sensor" : this.bridgeOk ? "bridge" : null; },
+  get supported() { return this.bridgeOk; },
+  get on() { return this.supported; },
+  get isDev() { return /^(localhost|127\.0\.0\.1)$/.test(location.hostname); },
   connectBridge() {
     if (!/^(localhost|127\.0\.0\.1)$/.test(location.hostname) || typeof EventSource !== "function") return;
     // 화면이 보일 때만 연결한다 (측정 중이면 계속). 연결이 끊기면 중계기가 기압계를 끄고, 오래 끊기면 중계기도 꺼진다.
@@ -336,42 +336,48 @@ const baro = {
   start(t0) {
     this.samples = []; this.t0 = t0; this.paused = false; this.recSec = 0; this.rec = false;
     // 중계기 주소(localhost)로 열었으면, 측정을 시작할 때 아직 연결 전이어도 연결되는 순간부터 기압을 함께 기록한다
-    if (this.es && typeof window.PressureSensor !== "function" && prefs.get("baro", "on") === "on") { this.rec = true; return; }
-    if (!this.on) return;
-    if (this.source === "bridge") { this.rec = true; return; }
-    try {
-      this.sensor = new window.PressureSensor({ frequency: 25 });
-      this.sensor.onreading = () => !this.paused && this.samples.push({ t: (performance.now() - this.t0) / 1000, p: this.sensor.pressure });
-      this.sensor.start();
-    } catch (e) { this.sensor = null; }
+    if (this.es) this.rec = true;
   },
-  stop() { this.rec = false; try { this.sensor && this.sensor.stop(); } catch (e) { /* 무시 */ } this.sensor = null; return this.samples && this.samples.length > 4 ? this.samples : null; },
+  stop() { this.rec = false; return this.samples && this.samples.length > 4 ? this.samples : null; },
   // 일시정지: 기록된 시간(recSec)까지만 남기고, 재개하면 그 시각부터 이어서 센다
   pause(recSec) { this.paused = true; if (this.samples) this.samples = this.samples.filter(b => b.t <= recSec); this.recSec = recSec; },
   resume() { this.paused = false; this.t0 = performance.now() - (this.recSec || 0) * 1000; },
 };
 function analysisOf(rec) {
-  const useBaro = !!(rec.baro && rec.baro.length > 4 && prefs.get("baro", "on") === "on");
-  const k = rec.id + ":" + rec.vert.length + ":" + (useBaro ? 1 : 0) + ":" + (rec.segs ? rec.segs.join(".") : "");
+  // 가속도 센서만으로 계산 (출발 직전 영점 + 전체 적분 + 정지 시점 되짚기). 기압은 기록만 하고 계산에는 쓰지 않는다.
+  const k = rec.id + ":" + rec.vert.length + ":" + (rec.segs ? rec.segs.join(".") : "");
   if (!cache.has(k)) {
     const A = Core.analyze(rec.vert, rec.lat, rec.rate, rec.segs);
-    if (useBaro) {
-      // 기압계는 보조: 운행마다 검증을 통과한 경우에만 속력과 주행 거리에 쓴다
-      const f = Core.baroRefine(A.series.speed, rec.rate, rec.baro, A.spans);
-      A.m.baroUse = { used: f.used, total: f.total, reasons: f.reasons };
-      if (f.used) {
-        const dist = new Float32Array(f.speed.length); let d = 0;
-        for (let i = 0; i < f.speed.length; i++) { d += Math.abs(f.speed[i]) / 60 / rec.rate; dist[i] = d; }
-        A.series.speed = f.speed; A.series.dist = dist;
-        let up = 0, down = 0; for (const v of f.speed) { if (v > up) up = v; if (-v > down) down = -v; }
-        Object.assign(A.m, { speedUp: up, speedDown: down, speedMax: Math.max(up, down), distance: d, baro: true });
-        A.m.eval = Core.evaluate(A.m);
-      }
-    }
     cache.set(k, A);
   }
   return cache.get(k);
 }
+/** 유리 이미지 지킴이: 못 불러오면 CSS로 그린 유리로 바꿔 두고, 다시 불러와지면 원래 이미지로 되돌린다 */
+const glassGuard = {
+  n: 0, keep: [], timer: null,
+  check() {
+    clearTimeout(this.timer);
+    const files = { "--glass-light": "assets/glass.webp", "--glass-dark": "assets/glass-dark.webp" };
+    const q = this.n ? "?r=" + this.n : "";
+    const jobs = Object.entries(files).map(([v, f]) => new Promise(ok => {
+      const im = new Image(); im.onload = () => ok([v, f + q, true]); im.onerror = () => ok([v, f + q, false]); im.src = f + q;
+    }));
+    Promise.all(jobs).then(rs => {
+      const root = document.documentElement;
+      if (rs.every(r => r[2])) {
+        if (this.n) for (const [v, u] of rs) root.style.setProperty(v, `url("${u}")`);   // 실패를 기억한 주소 대신 새 주소로
+        root.classList.remove("no-glass");
+        this.keep = rs;
+      } else {
+        root.classList.add("no-glass");
+        this.n++;
+        this.timer = setTimeout(() => this.check(), 8000);
+      }
+    });
+  },
+};
+addEventListener("online", () => document.documentElement.classList.contains("no-glass") && glassGuard.check());
+
 /** 목록 한줄평: 맨 앞 한 문장만 ("우당탕탕!"은 다음 문장과 함께) */
 function firstSentence(t) {
   const m = String(t || "").match(/^(우당탕탕!\s*)?[^.!?]*[.!?]/);
@@ -509,6 +515,7 @@ const ctl = {
   },
   begin(cal) {
     this.state = "measure"; this.phase = "run"; this.cal = cal; this.progress = 0;
+    this.gcal = [cal.g];      // 보정할 때 휴대폰이 잰 중력 크기 (가속도계 배율 오차 확인용, 실제 중력 ≈ 9.80 m/s²)
     this.segs = [0]; this.distOff = 0;
     this.abn = this.mode === "auto" ? new Core.AbnormalDetector(cal, FS) : null;
     this.an = new Core.RideAnalyzer(FS);
@@ -562,6 +569,7 @@ const ctl = {
     if (this.rb.length < RECAL_N) return;
     const m = [0, 0, 0]; for (const p of this.rb) for (let i = 0; i < 3; i++) m[i] += p[i] / this.rb.length;
     this.cal = new Core.Calibration(m[0], m[1], m[2]);
+    if (this.gcal) this.gcal.push(this.cal.g);
     this.abn = this.mode === "auto" ? new Core.AbnormalDetector(this.cal, FS) : null;
     this.distOff += this.o ? this.o.dist : 0;
     this.an = new Core.RideAnalyzer(FS); this.o = null;
@@ -589,6 +597,7 @@ const ctl = {
       vert: Float32Array.from(this.vert.slice(0, n)), lat: Float32Array.from(this.lat.slice(0, n)), updatedAt: Date.now(),
       baro: baroSamples ? baroSamples.filter(b => b.t <= n / FS) : null };
     if (segs.length > 1) rec.segs = segs;
+    if (this.gcal && this.gcal.length) rec.gcal = this.gcal.slice();
     try { await store.put(rec); } catch (e) { toast("기록을 저장하지 못했어요."); }
     records.render();
     detail.open(rec, "home");
@@ -855,6 +864,7 @@ const records = {
           vert: imp.vert, lat: imp.lat, updatedAt: Date.now() };
         if (imp.segs) rec.segs = imp.segs;
         if (imp.baro) rec.baro = imp.baro;
+        if (imp.gcal) rec.gcal = imp.gcal;
         await store.put(rec); ok++;
       } catch (e) { bad.push(f.name); }
     }
@@ -977,18 +987,15 @@ const settings = {
       <div class="acts"><button class="solid" id="dOk">확인</button></div>`, (b, close) => { b.querySelector("#dOk").onclick = close; });
     this.renderMode();
     this.renderBaro();
-    $("#baroSw").onclick = () => {
-      if (!baro.supported) return;
-      prefs.set("baro", baro.on ? "off" : "on"); cache.clear(); this.renderBaro(); records.render();
-    };
   },
+  /** 개발용 기압 기록 상태 (localhost로 열었을 때만 보임) */
   renderBaro() {
-    const sw = $("#baroSw"), ok = baro.supported;
-    sw.disabled = !ok; sw.setAttribute("aria-checked", ok && baro.on ? "true" : "false");
-    const live = baro.source === "bridge" && baro.live ? ` · 지금 ${baro.live.toFixed(2)} hPa` : "";
-    $("#baroDesc").textContent = ok ? (baro.on ? "속력과 운행 거리를 기압 변화로 보정해요" : "가속도 센서만으로 계산해요") + live
-      : /^(localhost|127\.0\.0\.1)$/.test(location.hostname) ? "기압 중계기가 꺼져 있어요. Termux에서 켜 주세요"
-      : "이 기기(브라우저)에서는 기압계를 쓸 수 없어 꺼져 있어요";
+    const card = $("#baroCard"); if (!card) return;
+    card.hidden = !baro.isDev;
+    if (!baro.isDev) return;
+    $("#baroDesc").textContent = baro.bridgeOk
+      ? `측정할 때 기압을 함께 기록해요 (계산에는 쓰지 않아요)${baro.live ? ` · 지금 ${baro.live.toFixed(2)} hPa` : ""}`
+      : "기압 중계기가 꺼져 있어요. Termux에서 켜 주세요";
   },
   renderMode() {
     const mode = ctl.mode, seg = $("#modeSeg"), btns = [...seg.querySelectorAll("button")];
@@ -1216,6 +1223,7 @@ const installer = {
   settings.init();
   ctl.init();
   baro.connectBridge();
+  glassGuard.check();
   nav.init();
   home.render();
   records.render();

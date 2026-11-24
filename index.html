@@ -25,7 +25,9 @@
   --font: "NanumSquareNeo", -apple-system, "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
   --font-num: "NanumSquareNeo", -apple-system, "Apple SD Gothic Neo", sans-serif;
   --sphere-shade: rgba(40, 52, 90, .16);
-  --glass-img: url("assets/glass.webp");
+  --glass-light: url("assets/glass.webp"); --glass-dark: url("assets/glass-dark.webp");
+  --glass-img: var(--glass-light);
+  --gf-body: rgba(214, 223, 239, .92); --gf-rim: rgba(255, 255, 255, .95); --gf-edge: rgba(120, 138, 180, .55);
   color-scheme: light;
 }
 :root[data-ui="dark"] {
@@ -33,7 +35,8 @@
   --ink: #EDF0F6; --ink-2: #A1AABC; --ink-3: #667085; --line: rgba(255, 255, 255, .07);
   --accent: #8197F2; --on-accent: #0F131B; --danger: #E5545B;
   --sphere-shade: rgba(0, 0, 0, .45);
-  --glass-img: url("assets/glass-dark.webp");
+  --glass-img: var(--glass-dark);
+  --gf-body: rgba(30, 37, 56, .95); --gf-rim: rgba(165, 182, 230, .5); --gf-edge: rgba(0, 0, 0, .55);
   color-scheme: dark;
 }
 * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
@@ -406,6 +409,13 @@ body.selecting #recList { padding-bottom: 150px; }
 #homeBody { transition: opacity .3s, filter .3s; }
 #homeBody.paused { opacity: .38; filter: saturate(.4); }
 .live-pill.paused i { animation: none; background: var(--ink-3); }
+
+/* 유리 이미지를 못 불러왔을 때(엘리베이터 안 오프라인 등) 대신 그리는 유리 — 이미지가 다시 오면 저절로 원래대로 */
+:root.no-glass .sphere .glass-base, :root.no-glass .mini {
+  background:
+    radial-gradient(ellipse 26% 15% at 38% 21%, rgba(255, 255, 255, .55), transparent 70%),
+    radial-gradient(ellipse 47.6% 46% at 50% 49.8%, var(--gf-body) 0 86%, var(--gf-rim) 95%, var(--gf-edge) 99%, transparent 100%); }
+:root.no-glass .sphere .glass-top, :root.no-glass .mini::after { background: radial-gradient(ellipse 26% 15% at 38% 21%, rgba(255, 255, 255, .5), transparent 70%); }
 </style>
 </head>
 <body>
@@ -454,10 +464,9 @@ body.selecting #recList { padding-bottom: 150px; }
             <div class="seg" id="modeSeg"><span class="thumb"></span><button data-mode="auto">자동</button><button data-mode="manual">수동</button></div>
           </div>
         </div>
-        <div class="set-card glass">
+        <div class="set-card glass" id="baroCard" hidden>
           <div class="set-row">
-            <div class="t"><h3 style="margin:0">기압계 오차 보정</h3><p id="baroDesc"></p></div>
-            <button class="switch" id="baroSw" role="switch" aria-checked="false" aria-label="기압계 오차 보정"><i></i></button>
+            <div class="t"><h3 style="margin:0">기압 기록 (개발용)</h3><p id="baroDesc"></p></div>
           </div>
         </div>
         <button class="row-btn glass" id="btnInstall" hidden>앱으로 설치하기 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M9 6l6 6-6 6"/></svg></button>

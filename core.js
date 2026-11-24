@@ -696,7 +696,7 @@
      흔들림(A95): ~8 아주 훌륭, ~10 좋음, ~20 일반적, ~30 좋지 않음, 그 이상 불쾌
      가감속 모양(가감속도+저크+가가가속도): 내부 점수 → 등급(훌륭/좋아요/무난/아쉬워요/점검) + 한마디 평
      속력: ~70 저속, ~130 중속, ~250 고속, ~500 초고속, 그 이상 '초고속의 초월' */
-  const EVAL_VER = 18;
+  const EVAL_VER = 19;
   function accGrade(a) {
     if (a <= 0.4) return { lv: 0, t: "거의 느껴지지 않을 만큼 순해요", s: "순해요" };
     if (a <= 0.7) return { lv: 1, t: "부드러워요", s: "부드러워요" };
@@ -817,107 +817,6 @@
     };
   }
 
-  /* ───────── 기압계 보정 (속력·주행 거리에만 적용) ─────────
-     기압 → 고도(국제표준대기), 0.5 Hz로 부드럽게 한 뒤 미분해 '기압 속력'을 구한다.
-     가속도 적분 속력의 빠른 변화(고역)와 기압 속력의 느린 흐름(저역)을 합치는 상보 필터.
-     baro: [{t: 측정 시작 후 초, p: hPa}] */
-  /** 기압계 보조 보정 (2026-11-24 사용자 확정) — 연돌 현상·문 여닫힘·피스톤 효과를 피하려고
-      · 멈춰 있는 동안의 기압은 쓰지 않는다: 운행(출발~정지) 안쪽만 본다
-      · 운행마다 기압 높이(h)를 가속도 높이(z)에 h ≈ α·z + β 로 맞춰 보고,
-        α가 0.85~1.15 밖이거나(이동 높이 차 15% 이상) 맞춘 뒤에도 기압이 튀면(잔차가 크면) 그 운행은 기압을 쓰지 않는다
-      · 초고속(500 m/min 초과)은 카 안 기압을 조절하기도 해서 쓰지 않는다
-      · 통과하면 높이 비율은 가속도를 믿고(α로 맞춤), 운행 중 느리게 쌓이는 오차의 모양만 기압으로 바로잡는다 */
-  function baroRefine(speed, fs, baro, spans) {
-    const n = speed.length;
-    const res = { speed: Float32Array.from(speed), used: 0, total: 0, reasons: [] };
-    if (!baro || baro.length < 5 || !spans || !spans.length) return res;
-    const bt = baro.map(b => b.t), bh = baro.map(b => 44330 * (1 - Math.pow(b.p / baro[0].p, 1 / 5.255)));
-    for (const [a, r] of spans) {
-      let pk = 0; for (let i = a; i < r; i++) pk = Math.max(pk, Math.abs(speed[i]));
-      if (pk < 6) continue;
-      res.total++;
-      if (pk > 500) { res.reasons.push("초고속"); continue; }
-      const t0 = a / fs, t1 = r / fs, idx = [];
-      for (let k = 0; k < bt.length; k++) if (bt[k] >= t0 && bt[k] <= t1) idx.push(k);
-      if (idx.length < Math.max(8, (t1 - t0) * 2)) { res.reasons.push("기압 표본 부족"); continue; }
-      // 가속도 높이 z(t)
-      const z = new Float64Array(r - a + 1); for (let i = a; i < r; i++) z[i - a + 1] = z[i - a] + speed[i] / 60 / fs;
-      const zAt = t => z[Math.max(0, Math.min(z.length - 1, Math.round(t * fs) - a))];
-      const X = idx.map(k => zAt(bt[k])), Y = idx.map(k => bh[k]);
-      const dz = z[z.length - 1];
-      if (Math.abs(dz) < 1.5) { res.reasons.push("이동이 짧음"); continue; }
-      const mx = X.reduce((p, q) => p + q, 0) / X.length, my = Y.reduce((p, q) => p + q, 0) / Y.length;
-      let sxy = 0, sxx = 0; for (let k = 0; k < X.length; k++) { sxy += (X[k] - mx) * (Y[k] - my); sxx += (X[k] - mx) ** 2; }
-      const al = sxx > 0 ? sxy / sxx : 0, be = my - al * mx;
-      let rss = 0; for (let k = 0; k < X.length; k++) rss += (Y[k] - (al * X[k] + be)) ** 2;
-      const rms = Math.sqrt(rss / X.length);
-      if (!(al >= 0.85 && al <= 1.15)) { res.reasons.push("이동 높이 불일치"); continue; }
-      if (rms > Math.max(0.4, 0.05 * Math.abs(dz))) { res.reasons.push("기압이 튐"); continue; }
-      // 통과: 높이 비율은 가속도를 믿고(÷α — 기압은 승강로 공기 온도에 따라 2~5% 높게 나옴, 월계삼창 실측),
-      // 60 Hz로 이어 둘의 속력 차이(운행 중 느리게 변하는 오차의 모양)만 빼 준다
-      const sc = al, hz = new Float64Array(r - a); let j = 0;
-      for (let i = a; i < r; i++) {
-        const t = i / fs; while (j < idx.length - 2 && bt[idx[j + 1]] < t) j++;
-        const k0 = idx[j], k1 = idx[Math.min(j + 1, idx.length - 1)];
-        const h = bt[k1] > bt[k0] ? bh[k0] + (bh[k1] - bh[k0]) * clamp01((t - bt[k0]) / (bt[k1] - bt[k0])) : bh[k0];
-        hz[i - a] = (h - be) / sc;
-      }
-      // 운행 중 기압이 튀었는지: 3초 간격으로 잰 기압 속력과 가속도 속력의 차이
-      // (2026-11-24 월계삼창 실측: 기압계 잡음만으로도 1초 창은 13 m/min까지 벌어짐, 3초 창은 10 m/min 안 → 3초 창·15 m/min)
-      { const W = Math.round(1.5 * fs); let worst = 0;
-        for (let i = a + W; i < r - W; i++) {
-          const vb = (hz[i - a + W] - hz[i - a - W]) / (2 * W / fs) * 60, va = (z[i - a + W + 1] - z[i - a - W + 1]) / (2 * W / fs) * 60;
-          worst = Math.max(worst, Math.abs(vb - va));
-        }
-        if (worst > Math.max(15, 0.2 * pk)) { res.reasons.push("기압이 튐"); continue; } }
-      const fA1 = Biquad.make(0.4, fs, false), fA2 = Biquad.make(0.4, fs, false), fB1 = Biquad.make(0.4, fs, false), fB2 = Biquad.make(0.4, fs, false);
-      const k = 1 / (3 * fs); let prev = null, err = 0;
-      // 필터 시작 흔들림을 줄이려고 첫 값으로 채운 뒤 시작
-      for (let w = 0; w < fs; w++) { fB2.process(fB1.process(hz[0])); fA2.process(fA1.process(0)); }
-      prev = hz[0];
-      for (let i = a; i < r; i++) {
-        const hs = fB2.process(fB1.process(hz[i - a])), vb = (hs - prev) * fs * 60; prev = hs;
-        const va = fA2.process(fA1.process(speed[i]));
-        err += k * ((va - vb) - err);
-        // 출발·도착 무렵은 0으로 묶여 있으니(정지 시점 되짚기) 오차 보정을 서서히 들이고 내보낸다
-        const w = Math.min(1, (i - a) / fs, (r - i) / fs);
-        res.speed[i] = speed[i] - err * w;
-      }
-      res.used++;
-    }
-    return res;
-  }
-  function fuseBaro(speed, fs, baro) {
-    const n = speed.length;
-    if (!baro || baro.length < 5 || n < fs) return null;
-    const alt = baro.map(b => ({ t: b.t, h: 44330 * (1 - Math.pow(b.p / baro[0].p, 1 / 5.255)) }));
-    // 60 Hz로 보간
-    const h = new Float64Array(n); let j = 0;
-    for (let i = 0; i < n; i++) {
-      const t = i / fs;
-      while (j < alt.length - 2 && alt[j + 1].t < t) j++;
-      const a = alt[j], b = alt[Math.min(j + 1, alt.length - 1)];
-      h[i] = b.t > a.t ? a.h + (b.h - a.h) * clamp01((t - a.t) / (b.t - a.t)) : a.h;
-    }
-    // 오차 추정 방식: 가속도 속력과 기압 속력을 '똑같은' 저역통과에 통과시켜 시간 지연을 맞춘 뒤
-    // 둘의 차이(= 가속도 적분의 누적 오차)만 천천히 추정해서 빼 준다. 움직임 자체는 가속도 쪽을 그대로 쓴다.
-    const fA1 = Biquad.make(0.4, fs, false), fA2 = Biquad.make(0.4, fs, false);
-    const fB1 = Biquad.make(0.4, fs, false), fB2 = Biquad.make(0.4, fs, false);
-    const TAU = 3, k = 1 / (TAU * fs);
-    const out = new Float32Array(n), dist = new Float32Array(n);
-    let prevH = null, err = 0, d = 0;
-    for (let i = 0; i < n; i++) {
-      const hs = fB2.process(fB1.process(h[i]));
-      const vb = prevH === null ? 0 : (hs - prevH) * fs * 60; prevH = hs;          // m/min, 지연 포함
-      const va = fA2.process(fA1.process(speed[i]));                                // 같은 지연
-      if (i > fs) err += k * ((va - vb) - err);
-      if (speed[i] === 0) err *= 0.98;                                             // 정지하면 오차 추정을 서서히 비움
-      out[i] = speed[i] === 0 ? 0 : speed[i] - err;
-      d += Math.abs(out[i]) / 60 / fs; dist[i] = d;
-    }
-    return { speed: out, dist };
-  }
-  /** 봉우리들의 돌출도 목록 (큰 순) */
   function proms(x, lo, hi, h) {
     const out = [];
     for (let i = lo + 1; i < hi - 1; i++) {
@@ -1014,6 +913,9 @@
     let startedAt = null;
     const r2 = rows[1] || [];
     if (String(r2[0] || "").startsWith("# started_at")) { const d = Date.parse(String(r2[1]).replace(" ", "T")); if (!Number.isNaN(d)) startedAt = d; }
+    // 보정할 때 잰 중력 크기 (가속도계 배율 확인용)
+    let gcal = null;
+    { const k = r2.findIndex(c => String(c).trim() === "gravity_m_s2"); if (k >= 0) { const g = String(r2[k + 1] || "").split(";").map(Number).filter(x => x > 5 && x < 15); if (g.length) gcal = g; } }
     let segs = null;
     if (sg.length) {
       const st = [0];
@@ -1021,7 +923,7 @@
       if (st.length > 1) segs = st;
     }
     const baro = pr.length > 4 ? pr.map(({ k, p }) => ({ t: ts[k], p })) : null;
-    return { vert: vN.data, lat: lN ? lN.data : null, rate: FS, startedAt, segs, baro, info: { srcRate, vertUnit: vN.unit, latUnit: lN ? lN.unit : null } };
+    return { vert: vN.data, lat: lN ? lN.data : null, rate: FS, startedAt, segs, baro, gcal, info: { srcRate, vertUnit: vN.unit, latUnit: lN ? lN.unit : null } };
   }
 
   function exportCsv(rec, A) {
@@ -1030,7 +932,7 @@
     const when = `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
     const lines = [
       `# name,"${(rec.name || "").replace(/"/g, '""')}"`,
-      `# started_at,${when},sample_rate_hz,${rec.rate}`,
+      `# started_at,${when},sample_rate_hz,${rec.rate}${rec.gcal && rec.gcal.length ? ",gravity_m_s2," + rec.gcal.map(g => g.toFixed(4)).join(";") : ""}`,
       "time_s,vertical_accel_m_s2,accel_m_s2,jerk_m_s3,lateral_accel_m_s2,vertical_vib_gal,lateral_vib_gal,speed_m_min,distance_m,segment,pressure_hpa",
     ];
     const bd = segBounds(n, rec.segs);
@@ -1106,7 +1008,7 @@
 
   const Core = {
     FS, P, Biquad, Resampler, StabilityDetector, Calibration, AbnormalDetector, PeakToPeak, RideAnalyzer,
-    analyze, segBounds, baroRefine, evaluate, rideShape, _dbg: { zp, grad, peaks }, fuseBaro, EVAL_VER, ppStats, percentile, parseCsv, importCsv, exportCsv, DemoSignal,
+    analyze, segBounds, evaluate, rideShape, _dbg: { zp, grad, peaks }, EVAL_VER, ppStats, percentile, parseCsv, importCsv, exportCsv, DemoSignal,
   };
   if (typeof module !== "undefined" && module.exports) module.exports = Core;
   else root.Core = Core;
