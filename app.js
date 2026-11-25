@@ -4,7 +4,7 @@
 /* ───────── 상수 ───────── */
 const FS = Core.FS;
 /* 앱 버전 (2026-11-25 사용자 확정): 0.큰 기능 묶음.고친 횟수 — 웹 앱 확정 때 1.0.0, 안드로이드 앱 때 2.0.0 */
-const APP_VERSION = "0.11.7";
+const APP_VERSION = "0.11.8";
 const LEGEND = { acc: 1.5, lat: 30, latA: 20, spd: 600 };   // 물 높이 범례 (화면에 표시하지 않음). lat: 실시간 p-p, latA: 기록의 |A95|
 const CUT = Math.round(Core.P.CUT_SEC * FS);
 const CUT_MANUAL = Math.round(0.3 * FS);   // 수동 모드 종료 시 버려지는 마지막 0.3초
@@ -1171,10 +1171,11 @@ const help = {
 };
 
 /* ───────── 가로 스와이프 공통 ───────── */
-/** 세로로 쓸어 넘기기 (2026-11-25 사용자 수정): 위로 쓸면 = 자세히, 자세히에서 아래로 쓸면 = 간단히
- *  내용이 스크롤되는 곳이라, 위로는 맨 아래에 있을 때만 · 아래로는 맨 위에 있을 때만 받는다 (스크롤과 겹치지 않게).
+/** 세로로 쓸어 넘기기 (2026-11-25 사용자 확정): 간단히·자세히 모두 아래에서 위로 쓸면 서로 바뀐다
+ *  (아래로 쓸기는 브라우저 '당겨서 새로 고침'과 겹쳐서 쓰지 않는다)
+ *  내용이 스크롤되는 곳이라 맨 아래에 있을 때만 받는다 (스크롤과 겹치지 않게).
  *  터치 이벤트로 받는다: 화면이 스크롤되기 시작해도 끝까지 따라가려고 */
-function vswipe(el, onDown, onUp, canStart = () => true) {
+function vswipe(el, onToggle, canStart = () => true) {
   let sx = 0, sy = 0, t0 = 0, on = false, atTop = false, atBottom = false;
   el.addEventListener("touchstart", e => {
     if (e.touches.length !== 1 || !canStart(e)) { on = false; return; }
@@ -1185,7 +1186,7 @@ function vswipe(el, onDown, onUp, canStart = () => true) {
     if (!on) return; on = false;
     const t = e.changedTouches[0], dx = t.clientX - sx, dy = t.clientY - sy, dt = performance.now() - t0;
     if (dt > 700 || Math.abs(dy) < 70 || Math.abs(dy) < Math.abs(dx) * 1.5) return;
-    if (dy < 0 && atBottom) onDown(); else if (dy > 0 && atTop) onUp();   // onDown = 자세히로, onUp = 간단히로
+    if (dy < 0 && atBottom) onToggle();
   }, { passive: true });
   el.addEventListener("touchcancel", () => { on = false; }, { passive: true });
 }
@@ -1235,12 +1236,12 @@ const nav = {
     $("#navHome").onclick = () => this.go(1);
     $("#navSettings").onclick = () => this.go(2);
     $("#btnHelp").onclick = () => help.open();
-    // 홈(측정): 위로 쓸면 자세히, 자세히에서 아래로 쓸면 간단히
+    // 홈(측정): 아래에서 위로 쓸면 간단히 ↔ 자세히
     const okHome = e => this.page === 1 && !this.overlay && !e.target.closest("input, .seg, .switch, .hold");
-    vswipe($("#pHome"), () => { if (!home.detail) { home.detail = true; home.render(); } }, () => { if (home.detail) { home.detail = false; home.render(); } }, okHome);
+    vswipe($("#pHome"), () => { home.detail = !home.detail; home.render(); }, okHome);
     // 기록 보기: 같은 방식 (자세히는 뒤로 가기 기록과 함께)
-    vswipe($("#detailIn"), () => { if (detail.rec && !detail.detail) { detail.setDetail(true); nav.push("recordfull"); } },
-      () => { if (detail.rec && detail.detail) nav.back(); }, e => !e.target.closest("input, button"));
+    vswipe($("#detailIn"), () => { if (!detail.rec) return; if (detail.detail) nav.back(); else { detail.setDetail(true); nav.push("recordfull"); } },
+      e => !e.target.closest("input, button"));
     if (location.hash) history.replaceState(null, "", location.pathname + location.search);   // 항상 홈에서 시작
     window.addEventListener("hashchange", () => this.onHash());
     window.addEventListener("resize", () => this.place());
