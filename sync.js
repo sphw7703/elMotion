@@ -223,7 +223,9 @@ const gsync = {
   setState(s) { this.state = s; this.render(); },
   render() {
     const card = $("#syncCard"); if (!card) return;
-    const desc = $("#syncDesc"), btn = $("#syncBtn"), acts = $("#syncActs"), line = $("#syncLine");
+    const desc = $("#syncDesc"), btn = $("#syncBtn"), acts = $("#syncActs"), icons = $("#syncIcons"), line = $("#syncLine");
+    icons.hidden = !(this.ready && this.on);
+    $("#syncNow").classList.toggle("spin", this.state === "busy");      // 맞추는 중: 새로 고침 아이콘이 돈다
     const t = this.last ? fmtClock(this.last) : "";
     if (!this.ready) { desc.textContent = "준비 중이에요. 구글 앱 키를 넣으면 쓸 수 있어요."; btn.hidden = true; acts.hidden = true; }
     else if (!this.on) { desc.textContent = "태블릿과 휴대폰의 기록을 구글 드라이브로 맞춰요."; btn.hidden = false; btn.textContent = "구글로 연결"; acts.hidden = true; }
