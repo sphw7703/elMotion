@@ -4,8 +4,8 @@
 /* ───────── 상수 ───────── */
 const FS = Core.FS;
 /* 앱 버전 (2026-11-25 사용자 확정): 0.큰 기능 묶음.고친 횟수 — 웹 앱 확정 때 1.0.0, 안드로이드 앱 때 2.0.0 */
-const APP_VERSION = "0.12.0";
-const LEGEND = { acc: 1.5, lat: 30, latA: 20, spd: 600 };   // 물 높이 범례 (화면에 표시하지 않음). lat: 실시간 p-p, latA: 기록의 |A95|
+const APP_VERSION = "0.12.1";
+const LEGEND = { acc: 1.5, lat: 30, latA: 20, spd: 600 };   // 물 높이 범례 (화면에 표시하지 않음). lat: 실시간 p-p, latA: 기록의 |98% 피크|
 const CUT = Math.round(Core.P.CUT_SEC * FS);
 const CUT_MANUAL = Math.round(0.3 * FS);   // 수동 모드 종료 시 버려지는 마지막 0.3초
 const HOLD_MS = 300;                       // 측정 재개: 이만큼 길게 눌러야 한다
@@ -367,7 +367,7 @@ function metaOf(rec) {
   const m = analysisOf(rec).m;
   return {
     id: rec.id, name: rec.name || "", startedAt: rec.startedAt, duration: m.duration, demo: !!rec.demo, imported: !!rec.imported, hasLat: !!rec.lat,
-    accPeak: m.accPeak, accMax: m.accMax, decMax: m.decMax, latA95: m.vibL ? m.vibL.a95 : null, speedMax: m.speedMax, overall: m.eval.overall, updatedAt: rec.updatedAt || Date.now(), evalVer: Core.EVAL_VER, srcKey: rec.srcKey || null,
+    accPeak: m.accPeak, accMax: m.accMax, decMax: m.decMax, latP98: m.vibL ? m.vibL.p98 : null, speedMax: m.speedMax, overall: m.eval.overall, updatedAt: rec.updatedAt || Date.now(), evalVer: Core.EVAL_VER, srcKey: rec.srcKey || null,
   };
 }
 const store = {
@@ -800,7 +800,7 @@ const records = {
     list.classList.toggle("selecting", !!this.selecting);
     list.innerHTML = this.items.map((m, k) => {
       const lv = (v, key) => (v > 0 ? clamp(v / LEGEND[key], 0.06, 1) : 0) * 100;
-      const lat = m.latA95 == null ? "—" : m.latA95.toFixed(1);
+      const lat = m.latP98 == null ? "—" : m.latP98.toFixed(1);
       const fitMini = t => (t.length >= 6 ? ' style="font-size:10.5px"' : t.length === 5 ? ' style="font-size:12px"' : "");   // 239.6처럼 긴 숫자는 원 안에 들어가게 줄임
       return `<article class="rec-card glass ${this.sel.has(m.id) ? "sel" : ""} ${this.anchor === k ? "anchor" : ""}" data-id="${esc(m.id)}" data-k="${k}" tabindex="0">
         <div class="rc-head"><span class="check"></span>
@@ -809,7 +809,7 @@ const records = {
           <button class="ic-btn pop" data-act="edit" aria-label="이름 변경">${ICON.edit}</button></div>
         <div class="rc-body"><div class="minis">
           <div class="mini k-acc" style="--lv:${lv(m.accPeak, "acc")}%"><span class="ms two"><b>${(m.accMax ?? m.accPeak).toFixed(2)}</b><b>${(m.decMax ?? m.accPeak).toFixed(2)}</b><i>m/s²</i></span></div>
-          <div class="mini k-lat" style="--lv:${m.latA95 == null ? 0 : lv(m.latA95, "latA")}%"><span class="ms"><b${fitMini(lat)}>${lat}</b><i>${m.latA95 == null ? "" : "gal"}</i></span></div>
+          <div class="mini k-lat" style="--lv:${m.latP98 == null ? 0 : lv(m.latP98, "latA")}%"><span class="ms"><b${fitMini(lat)}>${lat}</b><i>${m.latP98 == null ? "" : "gal"}</i></span></div>
           <div class="mini k-spd" style="--lv:${lv(m.speedMax, "spd")}%"><span class="ms"><b${fitMini(m.speedMax.toFixed(1))}>${m.speedMax.toFixed(1)}</b><i>m/min</i></span></div></div>
           <div class="rc-line">${esc(firstSentence(m.overall))}</div></div></article>`;
     }).join("");
@@ -1045,7 +1045,7 @@ const detail = {
       { k: "acc", lbl: "가감속도", lv: m.accPeak / LEGEND.acc, n1: m.accMax.toFixed(2), n2: m.decMax.toFixed(2), u: "m/s²",
         b: { lv: "n", t: ev.acc.t }, p: `가속 최대 ${m.accMax.toFixed(2)} · 감속 최대 ${m.decMax.toFixed(2)} m/s²` },
       m.vibL && m.vibL.n
-        ? { k: "lat", lbl: "좌우 흔들림", lv: m.vibL.a95 / LEGEND.latA, n1: m.vibL.a95.toFixed(1), u: "gal", b: { lv: ev.vibL.lv, t: ev.vibL.s }, p: ev.vibL.line }
+        ? { k: "lat", lbl: "좌우 흔들림", lv: m.vibL.p98 / LEGEND.latA, n1: m.vibL.p98.toFixed(1), u: "gal", b: { lv: ev.vibL.lv, t: ev.vibL.s }, p: ev.vibL.line }
         : { k: "lat", lbl: "좌우 흔들림", lv: 0, n1: "—", u: "gal", b: { lv: "n", t: "기록이 없어요." }, p: "" },
       { k: "spd", lbl: "속력", lv: m.speedMax / LEGEND.spd, n1: m.speedMax.toFixed(1), u: "m/min", b: ev.speed, p: "" },
     ];
@@ -1070,8 +1070,8 @@ const detail = {
       { l: "가감속도", v2: [["가속", m.accMax.toFixed(2)], ["감속", m.decMax.toFixed(2)]], u: "m/s²", e2: [`가속 ${ev.acc.a}`, `감속 ${ev.acc.d}`], lv: -1 },
       { l: "속력", v: m.speedMax.toFixed(1), u: "m/min", e: ev.speed.card || (m.speedMax <= 500 ? `${ev.speed.s} 승강기` : ev.speed.s), lv: -1 },
       { l: "운행 거리", v: m.distance.toFixed(1), u: "m", e: floors >= 1 ? `건물 약 ${floors}층 높이` : "거의 움직이지 않았어요", lv: -1 },
-      { l: "상하 흔들림", ...(m.vibV && m.vibV.n ? { v: m.vibV.a95.toFixed(1), u: "gal", e: ev.vibV.s, lv: ev.vibV.lv } : { v: "—", u: "", e: NO, lv: -1 }) },
-      { l: "좌우 흔들림", ...(m.vibL && m.vibL.n ? { v: m.vibL.a95.toFixed(1), u: "gal", e: ev.vibL.s, lv: ev.vibL.lv } : { v: "—", u: "", e: NO, lv: -1 }) },
+      { l: "상하 흔들림", ...(m.vibV && m.vibV.n ? { v: m.vibV.p98.toFixed(1), u: "gal", e: ev.vibV.s, lv: ev.vibV.lv } : { v: "—", u: "", e: NO, lv: -1 }) },
+      { l: "좌우 흔들림", ...(m.vibL && m.vibL.n ? { v: m.vibL.p98.toFixed(1), u: "gal", e: ev.vibL.s, lv: ev.vibL.lv } : { v: "—", u: "", e: NO, lv: -1 }) },
       { l: "출발 거칠기", ...gal(m.start, ev.start) },
       { l: "가감속 울렁임", ...gal(m.wave, ev.wave) },
       { l: "도착 거칠기", ...gal(m.arrive, ev.arrive) },

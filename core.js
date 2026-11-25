@@ -663,8 +663,8 @@
     for (const [s] of bounds) if (s > 0) vMask[s] = 0;   // 일시정지 경계에서 p-p를 끊는다
     const lMask = vMask;
 
-    // 상하·좌우 흔들림: 정속 구간의 절댓값 A95 (2026-11-25 사용자 확정)
-    const none = { a95: 0, max: 0, freq: 0, bumps: 0, spikes: 0, seconds: 0, n: 0 };
+    // 상하·좌우 흔들림: 정속 구간의 절댓값 98% 피크 (2026-11-26 사용자 확정, 예전 A95)
+    const none = { a95: 0, p98: 0, max: 0, freq: 0, bumps: 0, spikes: 0, seconds: 0, n: 0 };
     const vibV = texture(S.vibV, vMask, fs) || none;
     const vibL = hasLat ? (texture(S.vibL, lMask, fs) || none) : null;
 
@@ -809,7 +809,7 @@
       riseA: med("riseA"), relD: med("relD"), trips: out,
     };
   }
-  /** 흔들림의 세기(절댓값 A95)와 결(주파수·튀는 횟수) */
+  /** 흔들림의 세기(절댓값 98% 피크)와 결(주파수·튀는 횟수) */
   function texture(sig, mask, fs) {
     const vals = []; let zc = 0, prev = 0;
     for (let i = 0; i < sig.length; i++) {
@@ -821,6 +821,7 @@
     }
     if (vals.length < fs) return null;
     const a95 = percentile(vals, 0.95);
+    const p98 = percentile(vals, 0.98);       // 세기: 절댓값 98% 피크 (2026-11-26 사용자 확정, 예전 A95). A95는 결(툭 튀는 순간) 판정에만
     let max = 0; for (const v of vals) if (v > max) max = v;
     // 툭 튀는 순간: 평소(A95)보다 크게 튀는 봉우리, 0.3초 안의 것은 한 번으로
     const thr = Math.max(2.2 * a95, a95 + 5);
@@ -838,7 +839,7 @@
       if (q >= HIT_GAL && q >= Math.abs(sig[i - 1]) && q >= Math.abs(sig[i + 1]) && i - lastH > 0.25 * fs) { hits++; lastH = i; }
     }
     const seconds = vals.length / fs;
-    return { a95, max, freq: zc / 2 / seconds, bumps, spikes: bumps, hits, hitRate: hits / seconds * 10, seconds, n: vals.length };
+    return { a95, p98, max, freq: zc / 2 / seconds, bumps, spikes: bumps, hits, hitRate: hits / seconds * 10, seconds, n: vals.length };
   }
   const HIT_GAL = 8;
   /** 흔들림의 결: none(거의 없음) · single(한 번 툭) · sway(출렁, 3 Hz 이하) · tap(툭툭) */
@@ -861,7 +862,7 @@
   /* ───────── 평가 · AI 평가 (2026-11-25 사용자 확정) ─────────
      평가에 영향을 주는 지표 (5단계: 아주 좋음 · 좋음 · 보통 · 나쁨 · 매우 나쁨)
        저크 |99% 피크|: ~0.8 · ~1.0 · ~1.4 · ~1.8 · 초과 (m/s³)       — 사용자 지정 (2026-11-25 A95 → 99% 피크)
-       상하·좌우 흔들림 |A95|: ~8 · ~10 · ~15 · ~20 · 초과 (gal)        — 사용자 지정
+       상하·좌우 흔들림 |98% 피크|: ~8 · ~10 · ~15 · ~20 · 초과 (gal)   — 사용자 지정 (2026-11-26 A95 → 98% 피크, 기준값은 그대로)
        가감속 중 울렁임 (최댓값 + |최솟값|): ~15 · ~30 · ~45 · ~60 · 초과 — 사용자 지정
        출발·도착 거칠기 (p-p): ~20 · ~40 · ~60 · ~90 · 초과 (gal)       — 견본 12개로 정함 (매끄러운 출발 6~15, 덜컹 36~50, 요동 77, 우당탕 147~169)
        상하 툭툭 빈도 (정속 중 8 gal 넘게 튀는 횟수, 10초당): ~1 · ~2 · ~4 · ~8 · 초과 — 상하 흔들림 등급은 세기와 빈도 중 나쁜 쪽 (사용자 확정: 빈도는 평가에만, 문장에는 드러내지 않음)
@@ -872,7 +873,7 @@
        힘을 주는 시간 1.4초 이상 '슬며시', 0.55초 이하 '엣지 있게' / 힘을 빼는 시간 1.5초 이상 '슬며시', 0.5초 이하 '딱 끊어'
        흔들림의 결: 3 Hz 이하 출렁, 그 위 툭툭, 평소의 2.5배 넘게 한두 번만 튀면 '한 번 툭'
      속력: ~70 저속, ~130 중속, ~250 고속, ~500 초고속, 그 이상 '초고속의 초월' */
-  const EVAL_VER = 29;
+  const EVAL_VER = 30;
   const GRADE = ["아주 좋음", "좋음", "보통", "나쁨", "매우 나쁨"];
   const TH = { jerk: [0.8, 1.0, 1.4, 1.8], vib: [8, 10, 15, 20], wave: [15, 30, 45, 60], start: [20, 40, 60, 90], arrive: [20, 40, 60, 90], hit: [1, 2, 4, 8] };
   const DEC = { jerk: 2, vib: 1, wave: 0, start: 0, arrive: 0, hit: 1 };
@@ -991,7 +992,7 @@
     single: ["한 번씩 들썩여요", "가끔 한 번 툭 쳐요", "딱 한 번 덜컥해요", "잔잔하다가 한 번 들썩해요", "이음매를 지나듯 한 번 튀어요"],
   };
   const RISE_SOFT = 1.4, RISE_EDGE = 0.55, REL_SOFT = 1.5, REL_EDGE = 0.5;
-  const seedOf = m => Math.floor(((m.distance || 0) * 7.3 + (m.accPeak || 0) * 131 + (m.duration || 0) * 3.1 + (m.vibV ? m.vibV.a95 : 0) * 17) * 97) >>> 0;
+  const seedOf = m => Math.floor(((m.distance || 0) * 7.3 + (m.accPeak || 0) * 131 + (m.duration || 0) * 3.1 + (m.vibV ? m.vibV.p98 : 0) * 17) * 97) >>> 0;
   const pickBy = (arr, seed, k = 0) => arr[((seed >>> 4) + k * 7) % arr.length];
 
   /** AI 평가 문장 만들기 */
@@ -1057,13 +1058,13 @@
     return `${dir} ${pickBy(WORDS.feel[k], seed, vertical ? 1 : 2)}${f}`;
   }
   function evaluate(m) {
-    // 상하 흔들림: 세기(|A95|)와 툭툭 빈도 중 나쁜 쪽. 문장은 세기만으로 고른다 (빈도는 드러내지 않음)
-    const vibVa = m.vibV && m.vibV.n ? levelOf(m.vibV.a95, "vib") : null;
+    // 상하 흔들림: 세기(|98% 피크|)와 툭툭 빈도 중 나쁜 쪽. 문장은 세기만으로 고른다 (빈도는 드러내지 않음)
+    const vibVa = m.vibV && m.vibV.n ? levelOf(m.vibV.p98, "vib") : null;
     const vibVh = m.vibV && m.vibV.seconds >= 5 ? levelOf(m.vibV.hitRate, "hit") : null;
     const L = {
       jerk: levelOf(m.jerk, "jerk"),
       vibV: vibVa == null ? null : Math.max(vibVa, vibVh || 0),
-      vibL: m.vibL && m.vibL.n ? levelOf(m.vibL.a95, "vib") : null,
+      vibL: m.vibL && m.vibL.n ? levelOf(m.vibL.p98, "vib") : null,
       wave: levelOf(m.wave, "wave"), start: levelOf(m.start, "start"), arrive: levelOf(m.arrive, "arrive"),
     };
     const lv = Object.values(L).filter(v => v != null).sort((a, b) => b - a);
