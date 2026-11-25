@@ -339,7 +339,7 @@ const videoMaker = (() => {
     const cards = [
       m.jerk == null ? { l: "저크", v: "—", u: "", e: NO, lv: -1 } : { l: "저크", v: m.jerk.toFixed(2), u: "m/s³", e: ev.jerk.s, lv: ev.jerk.lv },
       { l: "가감속도", v2: [["가속", m.accMax.toFixed(2)], ["감속", m.decMax.toFixed(2)]], u: "m/s²", e2: [`가속 ${ev.acc.a}`, `감속 ${ev.acc.d}`], lv: -1 },
-      { l: "속력", v: m.speedMax.toFixed(1), u: "m/min", e: m.speedMax <= 500 ? `${ev.speed.s} 승강기` : ev.speed.s, lv: -1 },
+      { l: "속력", v: m.speedMax.toFixed(1), u: "m/min", e: ev.speed.card || (m.speedMax <= 500 ? `${ev.speed.s} 승강기` : ev.speed.s), lv: -1 },
       { l: "운행 거리", v: m.distance.toFixed(1), u: "m", e: Math.round(m.distance / 3) >= 1 ? `건물 약 ${Math.round(m.distance / 3)}층 높이` : "거의 움직이지 않았어요", lv: -1 },
       { l: "상하 흔들림", ...(m.vibV && m.vibV.n ? { v: m.vibV.a95.toFixed(1), u: "gal", e: ev.vibV.s, lv: ev.vibV.lv } : { v: "—", u: "", e: NO, lv: -1 }) },
       { l: "좌우 흔들림", ...(m.vibL && m.vibL.n ? { v: m.vibL.a95.toFixed(1), u: "gal", e: ev.vibL.s, lv: ev.vibL.lv } : { v: "—", u: "", e: NO, lv: -1 }) },

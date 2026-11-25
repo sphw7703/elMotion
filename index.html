@@ -172,6 +172,26 @@ canvas.chart { display: block; width: 100%; height: 150px; touch-action: pan-y; 
 .rec-card.sel .check::after { content: ""; width: 9px; height: 5px; border: 2.5px solid #fff; border-top: 0; border-right: 0; transform: rotate(-45deg) translate(1px, -1px); }
 .select-bar { position: fixed; left: 0; right: 0; bottom: calc(80px + env(safe-area-inset-bottom)); z-index: 5; display: flex; gap: 8px; justify-content: center; padding: 10px 20px; background: var(--bg); border-top: 1px solid var(--line); }
 .empty { text-align: center; color: var(--ink-2); padding: 70px 20px; font-size: 14px; }
+/* 기록 검색 (2026-11-25): 돋보기를 누르면 제목줄이 검색창으로 바뀐다 */
+.rec-search, #recQClose { display: none; }
+.rec-top.searching h2, .rec-top.searching #btnSearch, .rec-top.searching #btnImport, .rec-top.searching #btnExport, .rec-top.searching #btnDelete { display: none; }
+.rec-top.searching .rec-search { display: flex; }
+.rec-top.searching #recQClose { display: grid; }
+.rec-search { flex: 1; min-width: 0; height: 42px; align-items: center; gap: 8px; padding: 0 8px 0 14px; border-radius: 999px; cursor: text;
+  background: var(--surface); border: 1px solid var(--glass-border); box-shadow: var(--glass-shadow); color: var(--ink-3);
+  -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px); animation: qIn .28s cubic-bezier(.3,1.2,.5,1); }
+.rec-search:focus-within { box-shadow: var(--glass-shadow), 0 0 0 1.5px color-mix(in srgb, var(--hi, var(--accent)) 55%, transparent); }
+.rec-search input:focus-visible { outline: 0; }
+.rec-search > svg { width: 19px; height: 19px; flex: none; }
+.rec-search input { flex: 1; min-width: 0; height: 100%; border: 0; outline: 0; background: none; color: var(--ink); font: inherit; font-size: 15px; font-weight: 700; padding: 0; }
+.rec-search input::placeholder { color: var(--ink-3); font-weight: 600; }
+.rec-search input::-webkit-search-cancel-button { display: none; }
+.q-clear { width: 28px; height: 28px; display: grid; place-items: center; flex: none; color: var(--ink-3); --q-x: var(--surface-solid, #fff); }
+.q-clear svg { width: 18px; height: 18px; }
+:root[data-ui="dark"] .q-clear { --q-x: #0F131B; }
+@keyframes qIn { from { opacity: 0; transform: scaleX(.85); transform-origin: right; } }
+.rec-card mark { background: none; color: var(--hi, var(--accent)); box-shadow: inset 0 -.42em 0 color-mix(in srgb, var(--hi, var(--accent)) 24%, transparent); border-radius: 2px; }
+.rc-date mark { font-weight: 800; }
 
 /* 설정 */
 .profile { display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 12px 0 22px; }
@@ -543,8 +563,15 @@ body.selecting #recList { padding-bottom: 150px; }
     <div class="pager" id="pager">
       <!-- 기록 관리 -->
       <section class="page" id="pRecords" aria-label="기록 관리">
-        <div class="top">
+        <div class="top rec-top" id="recTop">
           <h2>기록 관리</h2>
+          <label class="rec-search" id="recSearch">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="11" cy="11" r="6.5"/><path d="M16 16l4.5 4.5"/></svg>
+            <input id="recQ" type="search" enterkeyhint="search" autocomplete="off" spellcheck="false" placeholder="파일 이름으로 찾기" aria-label="파일 이름으로 찾기">
+            <button type="button" class="q-clear" id="recQClear" aria-label="지우기" hidden><svg viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="12" r="10"/><path d="M8.5 8.5l7 7M15.5 8.5l-7 7" stroke="var(--q-x)" stroke-width="2" stroke-linecap="round"/></svg></button>
+          </label>
+          <button class="round-btn pop" id="recQClose" aria-label="검색 닫기" title="검색 닫기"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+          <button class="round-btn pop" id="btnSearch" aria-label="기록 검색" title="기록 검색"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="11" cy="11" r="6.5"/><path d="M16 16l4.5 4.5"/></svg></button>
           <button class="round-btn pop" id="btnImport" aria-label="파일 가져오기" title="파일 가져오기"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v11m0 0l-4-4m4 4l4-4"/><path d="M4 15v3a3 3 0 003 3h10a3 3 0 003-3v-3"/></svg></button>
           <button class="round-btn pop" id="btnExport" aria-label="파일 내보내기" title="파일 내보내기"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 14V3m0 0L8 7m4-4l4 4"/><path d="M4 15v3a3 3 0 003 3h10a3 3 0 003-3v-3"/></svg></button>
           <button class="round-btn pop" id="btnDelete" aria-label="기록 삭제" title="기록 삭제"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14"/></svg></button>

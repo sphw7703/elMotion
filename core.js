@@ -490,24 +490,128 @@
        · 도착해 멈춘 순간 남은 속력을 운행 시간에 비례해 거꾸로 나눠 뺀다 (엘리베이터는 출발 전·도착 후 반드시 속력 0)
        월계삼창 1→10층(정격 60 m/min) 실측: 편도 거리 오차 평균 0.8%, 정속 속력 60.0±0.7 m/min.
        정지로 끝나지 않은 운행(일시정지·측정 종료로 잘림)은 기존 계산을 그대로 쓴다. */
+    /* 정속 속력: 가속·감속 따로 재서 평균 (2026-11-25 사용자 확정, 정격 속력을 아는 엘리베이터 20대 검증: 평균 오차 3.3% → 2.0%)
+       운행 중에는 가속도 센서 영점이 멈춰 있을 때와 달라져(위쪽으로 밀림) 위로 가속하는 구간은 크게, 아래로 가속하는 구간은 작게 잡힌다.
+       그래서 출발 구간은 출발 직전 영점으로, 도착 구간은 멈춘 직후 영점으로 따로 적분해 정속 속력 두 개를 얻고 평균한다(오차가 서로 반대라 상쇄).
+       속력 곡선: 출발 구간은 앞에서, 도착 구간은 뒤에서 적분하고 각각 평균 속력에 닿도록 고르게 맞춘다. 정속 구간은 적분 모양을 두고 양 끝을 평균 속력에 맞춘다.
+       정속 구간이 없는 짧은 운행(정격 속력 미도달)이나 2단 감속처럼 두 값이 크게 다르면 예전 방식(전체 적분 + 정지 시점 되짚기). */
+    const tripV = [];       // {v: 정속 속력(m/min, 부호=방향), ref: 참고값(기록이 잘림), short: 정속 구간 없음}
+    const smooth = (a, b, b0) => {                       // 0.3초 이동평균 (가감속 구간 찾기용)
+      const w = Math.max(1, Math.round(0.15 * fs)), out = new Float64Array(b - a);
+      for (let k = a; k < b; k++) { let t = 0, c = 0; for (let j = Math.max(a, k - w); j <= Math.min(b - 1, k + w); j++) { t += vert[j] - b0; c++; } out[k - a] = t / c; }
+      return out;
+    };
+    /** 가속 구간 끝 p1, 감속 구간 시작 p2 (없으면 null) */
+    const phases = (a, rs, b0) => {
+      const x = smooth(a, rs, b0), L = x.length, big = 0.1, qt = 0.03, hold = Math.round(0.4 * fs);
+      let i = 0; while (i < L && Math.abs(x[i]) < big) i++;
+      if (i >= L) return null;
+      const sgn = Math.sign(x[i]);
+      let q = 0; for (; i < L; i++) { if (Math.abs(x[i]) < qt) { if (++q >= hold) break; } else q = 0; }
+      const p1 = a + i - q + 1;
+      let j = L - 1; while (j > 0 && Math.abs(x[j]) < big) j--;
+      if (Math.sign(x[j]) === sgn) return null;
+      // 움직임이 끝난 순간 em: 마지막 감속(착상 포함)이 끝나고 조용해진 곳. 멈춘 뒤 오래 서 있던 시간까지 적분하지 않게
+      let k = j; q = 0; for (; k < L; k++) { if (Math.abs(x[k]) < qt) { if (++q >= hold) break; } else q = 0; }
+      const em = k >= L ? a + L : a + k - q + 1;
+      q = 0; for (; j > 0; j--) { if (Math.abs(x[j]) < qt) { if (++q >= hold) break; } else q = 0; }
+      const p2 = a + j + q - 1;
+      return p2 - p1 >= Math.round(fs) ? { p1, p2, em, sgn } : null;
+    };
+    // 영점은 평균이 아니라 중앙값: 출발 직전 문 닫힘·발소리 같은 짧은 흔들림에 끌려가지 않게 (평균이면 정속 속력이 3 m/min 넘게 틀어졌다)
+    const med = (i0, i1) => { const t = Array.from(vert.subarray(i0, i1)).sort((p, q) => p - q); return t.length ? t[t.length >> 1] : 0; };
+    /** 가속 구간 끝 (감속을 못 찾았을 때용) */
+    const accelEnd = (a, r, b0) => {
+      const x = smooth(a, r, b0), hold = Math.round(0.4 * fs);
+      let i = 0; while (i < x.length && Math.abs(x[i]) < 0.1) i++;
+      if (i >= x.length) return -1;
+      let q = 0; for (; i < x.length; i++) { if (Math.abs(x[i]) < 0.03) { if (++q >= hold) break; } else q = 0; }
+      return i >= x.length ? -1 : a + i - q + 1;
+    };
+    /** 운행 하나 [a, r): 정속 속력을 재고 속력 곡선을 다시 그린다.
+        z0: 출발 전 멈춰 있던 구간의 시작, post: 멈춘 뒤 볼 수 있는 끝, endCut: 기록이 정지 전에 끝남, vres: 정지 판정 때 남은 속력(m/s) */
+    const measure = (a, r, z0, post, endCut, vres) => {
+      if (r - a < 2) return;
+      let hasPre = a - z0 >= Math.round(0.3 * fs);
+      let b0 = hasPre ? med(z0, a) : 0;          // 출발 전 기록이 없으면 영점 0 (출발 중에 기록을 시작한 경우)
+      if (!hasPre && r - a > 2 * fs) {           // 기록 첫 1초가 조용하면(멈춰 있었음) 그 값을 영점으로: 센서 영점이 0에서 꽤 벗어난 기기 대비
+        const x = smooth(a, a + fs, 0); let lo = Infinity, hi = -Infinity; for (const v of x) { lo = Math.min(lo, v); hi = Math.max(hi, v); }
+        if (hi - lo < 0.05) b0 = med(a, a + fs);
+      }
+      // 실제 출발 순간: 휴대폰을 내려놓을 때의 흔들림 등으로 '움직임'이 일찍 잡혔으면, 실제 가속이 시작되기 전까지는 멈춰 있던 구간(영점)으로 쓴다
+      {
+        const x = smooth(a, r, b0);
+        let i = 0; while (i < x.length && Math.abs(x[i]) < 0.1) i++;
+        if (i < x.length) {
+          let k = i; while (k > 0 && Math.abs(x[k]) > 0.02) k--;
+          if (k >= Math.round(0.3 * fs)) {
+            const a2 = a + k; b0 = med(Math.max(a, a2 - Math.round(fs)), a2); hasPre = true;
+            for (let j = a; j < a2; j++) S.speed[j] = 0;
+            a = a2;
+          }
+        }
+      }
+      const L = r - a;
+      const ph = phases(a, r, b0);
+      const fw = new Float64Array(L); { let v = 0; for (let k = a; k < r; k++) { v += (vert[k] - b0) / fs; fw[k - a] = v * 60; } }
+      if (ph) {
+        const em = Math.min(r, ph.em), z1End = Math.min(post, em + Math.round(fs));
+        const hasPost = z1End - em >= Math.round(0.3 * fs);
+        const b1 = hasPost ? med(em, z1End) : b0;                 // 멈춘 직후 기록이 없으면 도착 구간도 출발 직전 영점으로
+        // 뒤에서 적분: 움직임이 끝난 순간(em) 속력 0
+        const bw = new Float64Array(L); { let v = 0; for (let k = r - 1; k >= a; k--) { bw[k - a] = v * 60; if (k < em) v -= (vert[k] - b1) / fs; } }
+        const i1 = ph.p1 - a, i2 = ph.p2 - a, ie = em - a;
+        const Va = fw[i1], Vd = bw[i2];
+        // 기록이 정지 무렵에 끝났으면: 감속으로 줄어든 속력이 출발 때 붙은 속력의 80%에 못 미치면 감속 도중에 끝난 것 → 도착 구간은 못 쓴다
+        const decOk = !endCut || (hasPre && Math.abs(Vd) >= 0.8 * Math.abs(Va));
+        const both = hasPre && decOk;
+        const ok = both ? Math.abs(Va - Vd) <= 0.25 * Math.max(Math.abs(Va), Math.abs(Vd)) : true;
+        const V = both ? (Va + Vd) / 2 : hasPre ? Va : Vd;
+        if (ok && (hasPre || decOk) && Math.sign(V) === ph.sgn) {
+          for (let k = 0; k <= i1; k++) S.speed[a + k] = hasPre ? fw[k] + (V - Va) * (k + 1) / (i1 + 1) : bw[k] + (V - Vd);
+          for (let k = i1 + 1; k < i2; k++) S.speed[a + k] = V + (fw[k] - fw[i1]) - (fw[i2] - fw[i1]) * (k - i1) / (i2 - i1);
+          for (let k = i2; k < L; k++) S.speed[a + k] = decOk ? (k < ie ? bw[k] + (V - Vd) * (ie - k) / Math.max(1, ie - i2) : 0) : V + (fw[k] - fw[i2]);
+          tripV.push({ v: V, ref: !both, short: false });
+          return;
+        }
+      }
+      let pk = 0; for (let k = 0; k < L; k++) if (Math.abs(fw[k]) > Math.abs(pk)) pk = fw[k];
+      // 기록이 정지 무렵에 끝났지만 속력이 거의 0으로 돌아왔으면: 정속 구간 없는 짧은 운행으로 본다
+      if (endCut && !ph && hasPre && Math.abs(fw[L - 1]) < 0.3 * Math.abs(pk)) endCut = false;
+      if (endCut) {
+        if (hasPre && !ph) {                                      // 감속 전에 기록이 끝남: 가속 구간만으로 (가속 끝을 못 찾으면 속력 최고값)
+          const p1 = accelEnd(a, r, b0), v = p1 > 0 ? fw[p1 - a] : pk;
+          if (Math.abs(v) > 6) { tripV.push({ v, ref: true, short: false }); return; }
+        }
+        tripV.push({ v: null, ref: true, short: false }); return;
+      }
+      // 정속 구간이 없는 짧은 운행이나 2단 감속 등: 예전 방식 (전체 적분 + 정지 시점 되짚기)
+      tripV.push({ v: null, ref: !hasPre, short: !ph });
+      if (!hasPre) { for (let k = a; k < r; k++) S.speed[k] -= vres * 60 * (k - a + 1) / L; return; }
+      const res = fw[L - 1];
+      for (let k = a; k < r; k++) S.speed[k] = fw[k - a] - res * (k - a + 1) / L;
+    };
     let prevEnd = -1;
-    for (const [a, r, vres, gs] of zupt) {
-      const L = r - a; if (L < 2) continue;
+    for (let zi = 0; zi < zupt.length; zi++) {
+      const [a, r, vres, gs] = zupt[zi];
       const z0 = Math.max(gs, prevEnd, a - Math.round(fs));
       prevEnd = r;
-      if (a - z0 < Math.round(0.3 * fs)) {                        // 출발 전 멈춰 있던 시간이 너무 짧으면: 기존 속력에 되짚기만
-        for (let k = a; k < r; k++) S.speed[k] -= vres * 60 * (k - a + 1) / L;
-        continue;
-      }
-      let b0 = 0; for (let i = z0; i < a; i++) b0 += vert[i]; b0 /= (a - z0);
-      // 되짚는 시점 r = 실제로 멈춘 순간 (착상까지 끝난 뒤 0.5초, stopAt). 정지 판정이 늦거나 이르게 내려져도 그 차이를 운행에 떠넘기지 않는다
-      const rs = r, Ls = rs - a;
-      let v = 0; const raw = new Float64Array(Ls);
-      for (let k = a; k < rs; k++) { v += (vert[k] - b0) / fs; raw[k - a] = v * 60; }
-      const res = raw[Ls - 1];
-      for (let k = a; k < rs; k++) S.speed[k] = raw[k - a] - res * (k - a + 1) / Ls;
+      const g = plan.groups.find(G => a >= G.s && a < G.e), gEnd = g ? g.e : n;
+      const nextA = zi + 1 < zupt.length && zupt[zi + 1][0] < gEnd ? zupt[zi + 1][0] : gEnd;
+      measure(a, r, z0, nextA, false, vres);
     }
-    if (zupt.length) { let d = 0; for (let i = 0; i < n; i++) { d += Math.abs(S.speed[i]) / 60 / fs; S.dist[i] = d; } }
+    // 측정이 끝날 때까지 '정지'로 판정되지 못한 마지막 운행 (기록이 정지 전후에 끝남)
+    {
+      const lastG = plan.groups[plan.groups.length - 1];
+      // 마지막으로 움직인 곳이 어느 정지 판정에도 들어가지 않았으면 (기록이 정지 무렵에 끝나 정지 판정을 못 받은 운행)
+      let lm = -1; if (lastG) for (let k = lastG.e - 1; k >= lastG.s; k--) if (moving[k] || Math.abs(S.speed[k]) > 1) { lm = k; break; }
+      if (lm > lastG.s && !zupt.some(z => z[0] <= lm && z[1] >= lm)) {
+        let a = lm; while (a > lastG.s && (moving[a - 1] || Math.abs(S.speed[a - 1]) > 1)) a--;
+        while (a > lastG.s && S.speed[a - 1] !== 0) a--;
+        measure(a, lastG.e, Math.max(lastG.s, prevEnd, a - Math.round(fs)), lastG.e, true, 0);
+      }
+    }
+    if (zupt.length || tripV.length) { let d = 0; for (let i = 0; i < n; i++) { d += Math.abs(S.speed[i]) / 60 / fs; S.dist[i] = d; } }
 
     // 운행 구간 (경계 0~3 근사): moving 구간 + 앞뒤 0.5초 (일시정지 경계는 넘지 않음)
     const pad = Math.round(0.5 * fs);
@@ -584,11 +688,27 @@
       accMax, decMax, accPeak: Math.max(accMax, decMax),
       jerkMax, jerk: q.jerk, start: q.start, arrive: q.arrive, wave: q.wave, waveFreq: q.waveFreq, riseA: q.riseA, relD: q.relD, tripQ: q.trips,
       vibV, vibL, speedUp: up, speedDown: down, speedMax: Math.max(up, down),
+      speedPeak: Math.max(up, down), speedRef: false, speedShort: false,
       distance: n ? S.dist[n - 1] : 0, cruise: cruise.map(([a, b]) => [a / fs, b / fs]),
       pauses: plan.raw.slice(1).map(([s]) => s / fs),
       level: lev.filter(Boolean).map(([a, b]) => [a / fs, b / fs]),          // 착상 구간 (분석 제외, 초)
       decel: (lev.dec || []).map(([a, b]) => [a / fs, b / fs]),               // 감속 구간 (초)
     };
+    m.tripV = tripV;
+    // 정속 속력 (가속·감속 평균, 위 참고): 정속 구간이 있는 운행이 하나라도 있으면 그 값으로 위/아래 최고 속력을 정한다
+    {
+      const full = tripV.filter(t => t.v != null);
+      if (full.length) {
+        const ups = full.filter(t => t.v > 0).map(t => t.v), dns = full.filter(t => t.v < 0).map(t => -t.v);
+        m.speedUp = ups.length ? Math.max(...ups) : 0; m.speedDown = dns.length ? Math.max(...dns) : 0;
+        m.speedMax = Math.max(m.speedUp, m.speedDown);
+        const best = full.reduce((p, t) => (Math.abs(t.v) > Math.abs(p.v) ? t : p));
+        m.speedRef = !!best.ref;                         // 기록이 잘린 운행으로 잰 값
+      } else {
+        m.speedRef = tripV.some(t => t.ref);
+        m.speedShort = tripV.length > 0 && tripV.every(t => t.short || t.v == null) && tripV.some(t => t.short);   // 정격 속력에 닿기 전에 감속
+      }
+    }
     m.eval = evaluate(m);
     return { series: S, m, spans: zupt.map(([a, r]) => [a, r]) };
   }
@@ -752,7 +872,7 @@
        힘을 주는 시간 1.4초 이상 '슬며시', 0.55초 이하 '엣지 있게' / 힘을 빼는 시간 1.5초 이상 '슬며시', 0.5초 이하 '딱 끊어'
        흔들림의 결: 3 Hz 이하 출렁, 그 위 툭툭, 평소의 2.5배 넘게 한두 번만 튀면 '한 번 툭'
      속력: ~70 저속, ~130 중속, ~250 고속, ~500 초고속, 그 이상 '초고속의 초월' */
-  const EVAL_VER = 27;
+  const EVAL_VER = 29;
   const GRADE = ["아주 좋음", "좋음", "보통", "나쁨", "매우 나쁨"];
   const TH = { jerk: [0.8, 1.0, 1.4, 1.8], vib: [8, 10, 15, 20], wave: [15, 30, 45, 60], start: [20, 40, 60, 90], arrive: [20, 40, 60, 90], hit: [1, 2, 4, 8] };
   const DEC = { jerk: 2, vib: 1, wave: 0, start: 0, arrive: 0, hit: 1 };
@@ -830,9 +950,10 @@
       ["잡아채는 듯한", "몹시 거친", "몹시 급한", "내동댕이치는 듯한", "거칠기 짝이 없는"],
     ],
     // 흔들림 (방향 + 말): 결과 단계마다
-    tap: [["살짝 톡톡", "가볍게 톡톡", "톡톡", "살짝 토독토독", "잔잔하게 톡톡"],
-          ["살짝씩 툭툭", "톡톡", "가끔 툭툭", "조금씩 툭툭", "툭툭 가볍게"],
-          ["툭툭", "자꾸 툭툭", "툭툭 치듯", "덜덜", "투둑투둑"],
+    // 톡톡·툭툭은 단계마다 한 개만 (2026-11-25 사용자 요청: 너무 자주 나옴)
+    tap: [["살짝 사르르", "잔물결처럼 살짝", "미세하게 자글자글", "아주 가볍게 톡톡", "잔잔하게 사르르"],
+          ["가볍게 자글자글", "잘게 드르르", "가끔 툭툭", "살짝 덜덜", "조금씩 들썩"],
+          ["덜덜", "자꾸 툭툭", "들썩들썩", "투둑투둑", "드르르 잘게"],
           ["툭툭 거칠게", "쿵쿵", "덜컹덜컹", "투둑투둑 거칠게", "자꾸 덜컹"],
           ["쿵쿵 세게", "덜컹덜컹 세게", "쾅쾅", "요란하게 덜컹", "쉴 새 없이 쿵쿵"]],
     sway: [["살짝 일렁", "잔잔하게 일렁", "가볍게 출렁", "살며시 일렁", "은은하게 출렁"],
@@ -840,13 +961,14 @@
            ["울렁울렁", "출렁출렁", "일렁일렁 크게", "넘실넘실", "물결치듯 출렁"],
            ["크게 울렁울렁", "크게 출렁출렁", "휘청휘청", "멀미 나게 울렁", "크게 넘실"],
            ["놀이기구처럼 출렁", "심하게 휘청", "배처럼 울렁", "크게 휘청휘청", "거세게 출렁"]],
-    single: [["한 번 톡", "딱 한 번 톡", "한 번 살짝 툭", "한두 번 톡", "가끔 한 번 톡"],
-             ["한 번 툭", "딱 한 번 툭", "한두 번 툭", "가끔 한 번 툭", "한 번 덜컥"],
+    single: [["한 번 살짝 들썩", "딱 한 번 톡", "한두 번 살짝", "가끔 한 번 들썩", "한 번 살짝 덜컥"],
+             ["한 번 툭", "딱 한 번 덜컥", "한두 번 들썩", "가끔 한 번 덜컥", "한 번 크게 들썩"],
              ["한 번 쿵", "한 번 덜컹", "한두 번 쿵", "한 번 크게 툭", "한 번 덜컥"],
              ["한 번 크게 쿵", "한 번 크게 덜컹", "한두 번 쿵", "한 번 쾅", "크게 한 번 툭"],
              ["한 번 쾅", "크게 한 번 쾅", "한두 번 쾅", "한 번 크게 쾅", "한 번 요란하게 쿵"]],
-    calm: ["모든 방향에서 흔들리지 않는 편안함.", "어느 쪽으로도 흔들림이 느껴지지 않아요.", "위아래도 좌우도 고요해요.", "흔들림 없이 차분해요.", "물컵을 올려 둬도 될 만큼 고요해요."],
-    calmV: ["위아래로 흔들리지 않는 편안함.", "위아래 흔들림이 느껴지지 않아요.", "위아래로 고요해요.", "흔들림 없이 차분해요.", "위아래로 잔잔해요."],
+    calm: ["위아래도 좌우도 잔잔해요.", "어느 쪽으로도 흔들림 없이 잔잔해요.", "위아래도 좌우도 고요하고 잔잔해요.", "흔들림 없이 잔잔하고 차분해요.", "물컵을 올려 둬도 될 만큼 잔잔해요."],
+    // 상하 흔들림 '아주 좋음'이면 '잔잔하다' 문구 (2026-11-25 사용자 확정)
+    calmV: ["위아래로 잔잔해요.", "위아래 흔들림 없이 잔잔해요.", "위아래로 고요하고 잔잔해요.", "위아래로 물결 없이 잔잔해요.", "위아래로 차분하게 잔잔해요."],
     // 성격: 힘을 주는 방식·빼는 방식
     riseSoft: ["슬며시 힘을 주며 출발해요.", "천천히 힘을 실으며 나아가요.", "스르르 힘을 더해 가요.", "조심스럽게 속력을 올려요.", "살며시 밀어 주듯 출발해요."],
     riseEdge: ["망설임 없이 힘을 실어요.", "단번에 힘을 주며 나아가요.", "엣지 있게 치고 나가요.", "시원시원하게 속력을 올려요.", "또렷하게 힘을 줘요."],
@@ -863,10 +985,10 @@
   };
   // 성격: 흔들림의 결 (간단히 화면의 한 줄 평, 앞에 '위아래로'·'좌우로')
   WORDS.feel = {
-    none: ["흔들림이 거의 없어요", "고요하게 잔잔해요", "흔들림을 느끼기 어려워요", "물컵도 잔잔할 만큼 조용해요", "미동도 없어요"],
+    none: ["잔잔해요", "고요하게 잔잔해요", "흔들림 없이 잔잔해요", "물컵도 잔잔할 만큼 조용해요", "잔잔하고 차분해요"],
     sway: ["천천히 출렁여요", "물결치듯 넘실거려요", "배를 탄 듯 일렁여요", "느릿하게 울렁거려요", "그네처럼 출렁여요"],
-    tap: ["툭툭 치듯 흔들려요", "잔걸음처럼 톡톡 튀어요", "잘게 덜덜 떨려요", "자갈길처럼 투둑거려요", "가볍게 툭툭 건드려요"],
-    single: ["한 번씩 툭 튀어요", "가끔 한 번 툭 쳐요", "딱 한 번 덜컥해요", "잔잔하다가 한 번 툭 해요", "이음매를 지나듯 한 번 튀어요"],
+    tap: ["자글자글 떨려요", "잔걸음처럼 톡톡 튀어요", "잘게 덜덜 떨려요", "자갈길처럼 투둑거려요", "잘게 들썩여요"],
+    single: ["한 번씩 들썩여요", "가끔 한 번 툭 쳐요", "딱 한 번 덜컥해요", "잔잔하다가 한 번 들썩해요", "이음매를 지나듯 한 번 튀어요"],
   };
   const RISE_SOFT = 1.4, RISE_EDGE = 0.55, REL_SOFT = 1.5, REL_EDGE = 0.5;
   const seedOf = m => Math.floor(((m.distance || 0) * 7.3 + (m.accPeak || 0) * 131 + (m.duration || 0) * 3.1 + (m.vibV ? m.vibV.a95 : 0) * 17) * 97) >>> 0;
@@ -915,7 +1037,8 @@
     }
     // 2) 흔들림
     const dirWord = (t, lv) => { const k = vibKind(t); return k === "none" ? null : pick(WORDS[k][lv]); };
-    const kV = m.vibV && m.vibV.n ? vibKind(m.vibV) : "none", kL = m.vibL && m.vibL.n ? vibKind(m.vibL) : "none";
+    // 상하 흔들림 등급이 '아주 좋음'이면 위아래는 잔잔한 것으로 말한다 (결이 톡톡이어도)
+    const kV = m.vibV && m.vibV.n && L.vibVg !== 0 ? vibKind(m.vibV) : "none", kL = m.vibL && m.vibL.n ? vibKind(m.vibL) : "none";
     if (kV !== "none" && kL !== "none" && kV === kL && L.vibV === L.vibL) out.push(`위아래, 좌우로도 ${dirWord(m.vibV, L.vibV)}.`);
     else {
       const wV = kV !== "none" ? dirWord(m.vibV, L.vibV) : null, wL = kL !== "none" ? dirWord(m.vibL, L.vibL) : null;
@@ -927,9 +1050,9 @@
     return out.join(" ");
   }
   /** 흔들림 한 줄 (간단히 화면) */
-  function vibLine(t, vertical, seed) {
+  function vibLine(t, vertical, seed, calm) {
     if (!t || !t.n) return "";
-    const k = vibKind(t), dir = vertical ? "위아래로" : "좌우로";
+    const k = calm ? "none" : vibKind(t), dir = vertical ? "위아래로" : "좌우로";
     const f = k === "single" ? ` · 최대 ${t.max.toFixed(0)} gal` : k === "none" || !t.freq ? "" : ` · 약 ${t.freq.toFixed(1)} Hz`;
     return `${dir} ${pickBy(WORDS.feel[k], seed, vertical ? 1 : 2)}${f}`;
   }
@@ -949,15 +1072,18 @@
     const g = k => (L[k] == null ? { lv: -1, s: "기록이 없어요." } : { lv: L[k], s: GRADE[L[k]] });
     const xA = accLv(m.accMax), xD = accLv(m.decMax), seed = seedOf(m);
     const sg = speedGrade(m.speedMax);
-    const text = m.speedMax < 3 || overall == null ? "엘리베이터가 움직인 구간을 찾지 못했어요." : aiText(m, { ...L, vibV: vibVa }, overall, perfect);
+    const text = m.speedMax < 3 || overall == null ? "엘리베이터가 움직인 구간을 찾지 못했어요." : aiText(m, { ...L, vibV: vibVa, vibVg: L.vibV }, overall, perfect);
     return {
       ver: EVAL_VER, overall: text, level: overall, levels: L,
       acc: { s: xA === xD ? xA[1] : `${xA[1]}·${xD[1]}`, t: xA === xD ? pickBy(WORDS.strength[xA[1]], seed) : `가속은 ${xA[3]} 감속은 ${xD[4]}`,
         detail: `가속은 ${xA[3]} 감속${xA === xD ? "도" : "은"} ${xD[4]}`, a: xA[1], d: xD[1] },
       jerk: g("jerk"), wave: g("wave"), start: g("start"), arrive: g("arrive"),
-      vibV: { ...g("vibV"), line: vibLine(m.vibV, true, seed) },
+      vibV: { ...g("vibV"), line: vibLine(m.vibV, true, seed, L.vibV === 0) },
       vibL: m.vibL ? { ...g("vibL"), line: vibLine(m.vibL, false, seed) } : null,
-      speed: { lv: 0, t: sg.t, s: sg.s },
+      // 정격 속력에 닿기 전에 감속한 짧은 운행 / 기록이 잘려 일부 구간으로만 잰 값 (2026-11-25 사용자 확정)
+      speed: m.speedShort ? { lv: 0, t: "정격 속력에 닿기 전에 멈췄어요", s: sg.s, card: "정격 속력 미도달" }
+        : m.speedRef ? { lv: 0, t: `${sg.t} (참고값)`, s: sg.s, card: `${m.speedMax <= 500 ? sg.s + " 승강기" : sg.s} · 참고값` }
+        : { lv: 0, t: sg.t, s: sg.s },
     };
   }
 

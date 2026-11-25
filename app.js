@@ -4,7 +4,7 @@
 /* ───────── 상수 ───────── */
 const FS = Core.FS;
 /* 앱 버전 (2026-11-25 사용자 확정): 0.큰 기능 묶음.고친 횟수 — 웹 앱 확정 때 1.0.0, 안드로이드 앱 때 2.0.0 */
-const APP_VERSION = "0.11.11";
+const APP_VERSION = "0.12.0";
 const LEGEND = { acc: 1.5, lat: 30, latA: 20, spd: 600 };   // 물 높이 범례 (화면에 표시하지 않음). lat: 실시간 p-p, latA: 기록의 |A95|
 const CUT = Math.round(Core.P.CUT_SEC * FS);
 const CUT_MANUAL = Math.round(0.3 * FS);   // 수동 모드 종료 시 버려지는 마지막 0.3초
@@ -29,6 +29,7 @@ const ICON = {
   edit: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 013 3L7 19l-4 1 1-4z"/></svg>',
   del: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14"/></svg>',
   back: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>',
+  search: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="11" cy="11" r="6.5"/><path d="M16 16l4.5 4.5"/></svg>',
   close: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>',
   chev: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>',
   spark: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l1.8 5.6L19.5 9l-5.7 1.6L12 16l-1.8-5.4L4.5 9l5.7-1.4z"/><path d="M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8z" opacity=".6"/></svg>',
@@ -311,6 +312,7 @@ function signed(v, d) { const s = Math.abs(v).toFixed(d); return parseFloat(s) =
 function hexA(hex, a) { const h = hex.replace("#", ""); const n = parseInt(h.length === 3 ? h.split("").map(c => c + c).join("") : h, 16); return `rgba(${n >> 16 & 255},${n >> 8 & 255},${n & 255},${a})`; }
 function roundRect(g, x, y, w, h, r) { g.beginPath(); g.moveTo(x + r, y); g.arcTo(x + w, y, x + w, y + h, r); g.arcTo(x + w, y + h, x, y + h, r); g.arcTo(x, y + h, x, y, r); g.arcTo(x, y, x + w, y, r); g.closePath(); }
 
+const LIVE_MS = { acc: 1000 / 15, spd: 1000 / 30, lat: 2000, dacc: 1000 / 15, dspd: 1000 / 30, dlat: 2000 };
 const SERIES = [
   { key: "acc", title: "가감속도", unit: "m/s²", dec: 2, half: 1.5, color: "#2C46BE" },
   { key: "jerk", title: "저크", unit: "m/s³", dec: 2, half: 1.0, color: "#D07A1F" },
@@ -612,7 +614,7 @@ const home = {
   },
   build(kind) {
     const body = $("#homeBody"); charts.clear(body); body.innerHTML = "";
-    this.big = this.trip = null; this.liveCharts = [];
+    this.big = this.trip = null; this.liveCharts = []; this.liveAt = {};
     if (kind === "single") {
       // 측정 대기·안정화: 원형 게이지 없이 글자만 화면 한가운데에 (2026-11-25 사용자 요청)
       body.innerHTML = `<div class="single fade-in"><div class="cap-wrap" id="capWrap"><div class="caption" id="cap"></div><div class="sub" id="capSub"></div><div id="capBtns" class="home-actions"></div></div></div>`;
@@ -624,7 +626,7 @@ const home = {
       const size = isWide() ? Math.round(clamp(Math.min((innerHeight - 260) * 0.95, (innerWidth - 160) / 3.6), 150, 340)) : Math.round(clamp(avail / 3, 104, 176));
       body.innerHTML = `<div class="triple">${[["acc", "가감속도"], ["lat", "좌우 흔들림"], ["spd", "현재 속력"]].map(([k, t], i) =>
         `<div class="item fade-in" style="animation-delay:${i * 0.1}s"><div class="lbl">${t}</div><div id="tr-${k}"></div></div>`).join("")}</div>`;
-      this.trip = {};
+      this.trip = {}; this.liveAt = {};
       for (const k of ["acc", "lat", "spd"]) { const s = new Sphere(k, size); $(`#tr-${k}`).appendChild(s.el); s.level(0); this.trip[k] = s; }
     } else {
       body.innerHTML = `<div class="stat-row fade-in">
@@ -718,10 +720,12 @@ const home = {
     $("#liveTime").textContent = `${lbl} ${Math.floor(sec / 60)}:${p2(Math.floor(sec % 60))}`;
     if (ctl.phase === "calib") { const b = $("#bResume"); if (b) b.style.setProperty("--p", clamp(ctl.recalP || 0, 0, 1)); }
     if (!o) return;
+    // 실시간 숫자 표시 주기 (2026-11-25 사용자 확정): 가감속 1초에 15번, 속력 1초에 30번, 좌우 흔들림 2초에 1번
+    const now = performance.now(), due = k => { const lt = this.liveAt || (this.liveAt = {}); if (lt[k] != null && now - lt[k] < LIVE_MS[k]) return false; lt[k] = now; return true; };
     if (this.trip) {
-      this.trip.acc.level(Math.abs(o.acc) / LEGEND.acc).text(Math.abs(o.acc).toFixed(2), null, "m/s²");
-      this.trip.lat.level(o.ppL / LEGEND.lat).text(o.ppL.toFixed(1), null, "gal");
-      this.trip.spd.level(Math.abs(o.speed) / LEGEND.spd).text(Math.abs(o.speed).toFixed(1), null, "m/min");
+      if (due("acc")) this.trip.acc.level(Math.abs(o.acc) / LEGEND.acc).text(Math.abs(o.acc).toFixed(2), null, "m/s²");
+      if (due("lat")) this.trip.lat.level(o.ppL / LEGEND.lat).text(o.ppL.toFixed(1), null, "gal");
+      if (due("spd")) this.trip.spd.level(Math.abs(o.speed) / LEGEND.spd).text(Math.abs(o.speed).toFixed(1), null, "m/min");
     } else if (this.liveCharts.length) {
       $("#lvJ").innerHTML = `${Math.abs(o.jerk).toFixed(2)}<small>m/s³</small>`;
       $("#lvV").innerHTML = `${o.ppV.toFixed(1)}<small>gal</small>`;
@@ -729,6 +733,8 @@ const home = {
       const n = ctl.live.acc.length, take = Math.min(n, LIVE_WIN), off = Math.max(0, ctl.vert.length - take) / FS;
       SERIES.forEach((s, i) => {
         const arr = ctl.live[s.key]; this.liveCharts[i].setValues(arr.slice(arr.length - take), off);
+        const k = s.key === "acc" ? "acc" : s.key === "speed" ? "spd" : s.key === "vibL" ? "lat" : null;
+        if (k && !due("d" + k)) return;
         const cur = arr[arr.length - 1]; $(`#lv-${s.key}`).textContent = cur == null ? "" : signed(s.key === "speed" ? cur : cur, s.dec);
       });
     }
@@ -738,13 +744,57 @@ const home = {
 /* ════════════════════════════════════════════════════════════════
    기록 관리
    ════════════════════════════════════════════════════════════════ */
+/* ───────── 기록 검색 (2026-11-25) ─────────
+   한 글자(숫자)만 넣어도 바로 찾는다. 대소문자 무시, 한글 초성(ㅂㄱ → 본관), 입력 중인 글자(보 → 본, 간 → 가나)도 맞춘다.
+   찾는 곳: 기록 이름, 측정 날짜, 내보낼 파일 이름, 가져온 원래 파일 이름 */
+const finder = {
+  CHO: "ㄱㄲㄴㄷㄸㄹㅁㅂㅃㅅㅆㅇㅈㅉㅊㅋㅌㅍㅎ",
+  JONG2CHO: ["", "ㄱ", "ㄲ", "", "ㄴ", "", "", "ㄷ", "ㄹ", "", "", "", "", "", "", "", "ㅁ", "ㅂ", "", "ㅅ", "ㅆ", "ㅇ", "ㅈ", "ㅊ", "ㅋ", "ㅌ", "ㅍ", "ㅎ"],
+  syl(c) { const k = c.charCodeAt(0) - 0xAC00; return k >= 0 && k < 11172 ? { cho: (k / 588) | 0, jung: ((k % 588) / 28) | 0, jong: k % 28 } : null; },
+  /** 글자 하나 비교. last: 검색어의 마지막 글자(아직 입력 중일 수 있음), next: 대상의 다음 글자 */
+  same(q, t, last, next) {
+    if (q === t) return true;
+    const qi = this.CHO.indexOf(q), ts = this.syl(t);
+    if (qi >= 0) return !!ts && ts.cho === qi;                     // 초성만: ㅂ → 본
+    if (!last) return false;
+    const qs = this.syl(q);
+    if (!qs || !ts || qs.cho !== ts.cho || qs.jung !== ts.jung) return false;
+    if (!qs.jong) return true;                                     // 보 → 본
+    const nx = next && this.syl(next);                             // 간 → 가나 (받침이 다음 글자 초성으로 넘어가는 중)
+    return !ts.jong && !!nx && this.CHO[nx.cho] === this.JONG2CHO[qs.jong];
+  },
+  /** 맞는 곳의 [시작, 끝] 또는 null */
+  find(q, text) {
+    const t = String(text || "").toLowerCase(), n = q.length;
+    for (let i = 0; i + n <= t.length; i++) {
+      let ok = true;
+      for (let j = 0; j < n && ok; j++) ok = this.same(q[j], t[i + j], j === n - 1, t[i + j + 1]);
+      if (ok) return [i, i + n];
+    }
+    return null;
+  },
+  mark(text, hit) { return hit ? esc(text.slice(0, hit[0])) + "<mark>" + esc(text.slice(hit[0], hit[1])) + "</mark>" + esc(text.slice(hit[1])) : esc(text); },
+};
+
 const records = {
-  selecting: null, sel: new Set(), items: [], anchor: null,   // selecting: null | "export" | "delete"
+  selecting: null, sel: new Set(), items: [], all: [], anchor: null,   // selecting: null | "export" | "delete"
+  searching: false, q: "",
+  /** 저장소에서 다시 읽고 그린다 */
   async render() {
-    const list = $("#recList");
-    try { this.items = await store.list(); } catch (e) { this.items = []; }
-    if (!this.items.length) {
+    try { this.all = await store.list(); } catch (e) { this.all = []; }
+    this.draw(true);
+  },
+  hayOf(m) { return [m.name || fmtDate(m.startedAt), m.name ? fmtDate(m.startedAt) : "", fileNameOf(m), m.src && m.src.name].filter(Boolean); },
+  /** 검색어로 거른 목록을 그린다 (anim: 카드가 차례로 나타나는 효과) */
+  draw(anim) {
+    const list = $("#recList"), q = this.searching ? this.q.trim().toLowerCase() : "";
+    this.items = q ? this.all.filter(m => this.hayOf(m).some(h => finder.find(q, h))) : this.all;
+    if (!this.all.length) {
       list.innerHTML = `<div class="empty">아직 측정 기록이 없어요.<br>홈에서 휴대폰을 내려놓으면 측정이 시작돼요.</div>`;
+      return;
+    }
+    if (!this.items.length) {
+      list.innerHTML = `<div class="empty">‘${esc(this.q.trim())}’ 검색 결과가 없어요.</div>`;
       return;
     }
     list.classList.toggle("selecting", !!this.selecting);
@@ -754,8 +804,8 @@ const records = {
       const fitMini = t => (t.length >= 6 ? ' style="font-size:10.5px"' : t.length === 5 ? ' style="font-size:12px"' : "");   // 239.6처럼 긴 숫자는 원 안에 들어가게 줄임
       return `<article class="rec-card glass ${this.sel.has(m.id) ? "sel" : ""} ${this.anchor === k ? "anchor" : ""}" data-id="${esc(m.id)}" data-k="${k}" tabindex="0">
         <div class="rc-head"><span class="check"></span>
-          <div class="t"><div class="rc-name"><span class="nm">${esc(m.name || fmtDate(m.startedAt))}</span>${m.demo ? '<span class="tag">데모</span>' : ""}${m.imported ? '<span class="tag">가져옴</span>' : ""}</div>
-          <div class="rc-date">${m.name ? fmtDate(m.startedAt) + " · " : ""}${fmtDur(m.duration)}</div></div>
+          <div class="t"><div class="rc-name"><span class="nm">${q ? finder.mark(m.name || fmtDate(m.startedAt), finder.find(q, m.name || fmtDate(m.startedAt))) : esc(m.name || fmtDate(m.startedAt))}</span>${m.demo ? '<span class="tag">데모</span>' : ""}${m.imported ? '<span class="tag">가져옴</span>' : ""}</div>
+          <div class="rc-date">${m.name ? (q ? finder.mark(fmtDate(m.startedAt), finder.find(q, fmtDate(m.startedAt))) : fmtDate(m.startedAt)) + " · " : ""}${fmtDur(m.duration)}</div></div>
           <button class="ic-btn pop" data-act="edit" aria-label="이름 변경">${ICON.edit}</button></div>
         <div class="rc-body"><div class="minis">
           <div class="mini k-acc" style="--lv:${lv(m.accPeak, "acc")}%"><span class="ms two"><b>${(m.accMax ?? m.accPeak).toFixed(2)}</b><b>${(m.decMax ?? m.accPeak).toFixed(2)}</b><i>m/s²</i></span></div>
@@ -763,7 +813,7 @@ const records = {
           <div class="mini k-spd" style="--lv:${lv(m.speedMax, "spd")}%"><span class="ms"><b${fitMini(m.speedMax.toFixed(1))}>${m.speedMax.toFixed(1)}</b><i>m/min</i></span></div></div>
           <div class="rc-line">${esc(firstSentence(m.overall))}</div></div></article>`;
     }).join("");
-    stagger(list, 12);
+    if (anim) stagger(list, 12);
     list.querySelectorAll(".rec-card").forEach(card => {
       const id = card.dataset.id, k = +card.dataset.k;
       card.onclick = async e => {
@@ -774,6 +824,27 @@ const records = {
       };
       card.onkeydown = e => { if (e.key === "Enter") card.click(); };
     });
+  },
+  /** 검색 열기: 제목줄이 검색창으로 바뀐다 (뒤로 가기로 닫힘) */
+  openSearch() {
+    if (this.searching) { $("#recQ").focus(); return; }
+    this.searching = true; this.q = "";
+    $("#recQ").value = ""; $("#recTop").classList.add("searching"); $("#recQClear").hidden = true;
+    $("#recQ").focus();
+    nav.push("search");
+    this.draw(false);
+  },
+  closeSearch() {
+    if (!this.searching) return;
+    this.searching = false; this.q = "";
+    $("#recTop").classList.remove("searching"); $("#recQ").blur();
+    this.draw(false);
+  },
+  onQuery(v) {
+    this.q = v; $("#recQClear").hidden = !v;
+    this.sel.clear(); this.anchor = null;
+    this.draw(false);
+    if (this.selecting) this.renderBar();
   },
   /** 범위 선택: 시작 기록과 끝 기록을 차례로 누르면 그 사이가 모두 선택(이미 모두 선택돼 있으면 해제) */
   pick(k) {
@@ -997,7 +1068,7 @@ const detail = {
     const cards = [
       m.jerk == null ? { l: "저크", v: "—", u: "", e: NO, lv: -1 } : { l: "저크", v: m.jerk.toFixed(2), u: "m/s³", e: ev.jerk.s, lv: ev.jerk.lv },
       { l: "가감속도", v2: [["가속", m.accMax.toFixed(2)], ["감속", m.decMax.toFixed(2)]], u: "m/s²", e2: [`가속 ${ev.acc.a}`, `감속 ${ev.acc.d}`], lv: -1 },
-      { l: "속력", v: m.speedMax.toFixed(1), u: "m/min", e: m.speedMax <= 500 ? `${ev.speed.s} 승강기` : ev.speed.s, lv: -1 },
+      { l: "속력", v: m.speedMax.toFixed(1), u: "m/min", e: ev.speed.card || (m.speedMax <= 500 ? `${ev.speed.s} 승강기` : ev.speed.s), lv: -1 },
       { l: "운행 거리", v: m.distance.toFixed(1), u: "m", e: floors >= 1 ? `건물 약 ${floors}층 높이` : "거의 움직이지 않았어요", lv: -1 },
       { l: "상하 흔들림", ...(m.vibV && m.vibV.n ? { v: m.vibV.a95.toFixed(1), u: "gal", e: ev.vibV.s, lv: ev.vibV.lv } : { v: "—", u: "", e: NO, lv: -1 }) },
       { l: "좌우 흔들림", ...(m.vibL && m.vibL.n ? { v: m.vibL.a95.toFixed(1), u: "gal", e: ev.vibL.s, lv: ev.vibL.lv } : { v: "—", u: "", e: NO, lv: -1 }) },
@@ -1172,7 +1243,7 @@ const nav = {
     swipe(pager, dir => this.go(clamp(this.page + dir, 0, 2)),
       dx => { const W = pager.parentElement.clientWidth; const edge = (this.page === 0 && dx > 0) || (this.page === 2 && dx < 0); pager.style.transform = `translateX(${-this.page * W + (edge ? dx * 0.3 : dx)}px)`; },
       () => this.go(this.page),
-      e => !this.overlay && !records.selecting && !e.target.closest("input, .seg, .switch"));
+      e => !this.overlay && !records.selecting && !records.searching && !e.target.closest("input, .seg, .switch"));
     $("#navRecords").onclick = () => this.go(0);
     $("#navHome").onclick = () => this.go(1);
     $("#navSettings").onclick = () => this.go(2);
@@ -1207,11 +1278,13 @@ const nav = {
   /** 해시 상태를 화면에 반영 (기록 스택은 건드리지 않는다) */
   apply(h) {
     if (h !== "select" && records.selecting) records.setSelecting(null);
+    if (records.searching && (h === "" || h === "records" || h === "settings")) records.closeSearch();
     if (h !== "record" && h !== "recordfull" && h !== "help" && this.overlay) this.hideSheet();
     if (h === "" ) return this.showPage(1);
     if (h === "records") return this.showPage(0);
     if (h === "settings") return this.showPage(2);
-    if (h === "select") { if (!records.selecting) this.replace("records"); return; }
+    if (h === "select") { if (!records.selecting) this.replace(records.searching ? "search" : "records"); return; }
+    if (h === "search") { if (!records.searching) this.replace("records"); else this.showPage(0); return; }
     if (h === "record" || h === "recordfull") {
       if (!detail.rec) { this.replace(this.page === 0 ? "records" : ""); return; }
       if (this.overlay !== "record") this.showSheet("record");
@@ -1224,7 +1297,7 @@ const nav = {
   go(i) {
     const target = i === 0 ? "records" : i === 2 ? "settings" : "";
     if (target === this.top) return this.showPage(i);
-    if (!target) return this.stack.length > 1 ? this.back() : this.replace("");
+    if (!target) { const n = this.stack.length - 1; return n > 0 ? history.go(-n) : this.replace(""); }   // 검색·선택 중이어도 한 번에 홈으로
     if (this.top === "") this.push(target); else this.replace(target);
     this.showPage(i);
   },
@@ -1372,6 +1445,11 @@ const installer = {
   $("#navSettings").addEventListener("click", () => gsync.preload());
   $("#navRecords").addEventListener("click", () => { if (gsync.on && gsync.tokenOk() && Date.now() - gsync.last > 60e3) gsync.soon(200); });
   $("#btnImport").onclick = () => $("#fileIn").click();
+  $("#btnSearch").onclick = () => records.openSearch();
+  $("#recQ").addEventListener("input", e => records.onQuery(e.target.value));
+  $("#recQ").addEventListener("keydown", e => { if (e.key === "Enter") e.target.blur(); if (e.key === "Escape") nav.back(); });
+  $("#recQClear").onclick = () => { $("#recQ").value = ""; records.onQuery(""); $("#recQ").focus(); };
+  $("#recQClose").onclick = () => nav.back();
   addEventListener("resize", () => nav.moveOrb());
   requestAnimationFrame(() => { $("#navOrb").classList.add("ready"); nav.moveOrb(); });
   $("#fileIn").onchange = e => { const f = [...e.target.files]; e.target.value = ""; records.importFiles(f); };
