@@ -4,7 +4,7 @@
 /* ───────── 상수 ───────── */
 const FS = Core.FS;
 /* 앱 버전 (2026-11-25 사용자 확정): 0.큰 기능 묶음.고친 횟수 — 웹 앱 확정 때 1.0.0, 안드로이드 앱 때 2.0.0 */
-const APP_VERSION = "0.10.12";
+const APP_VERSION = "0.11.0";
 const LEGEND = { acc: 1.5, lat: 30, latA: 20, spd: 600 };   // 물 높이 범례 (화면에 표시하지 않음). lat: 실시간 p-p, latA: 기록의 |A95|
 const CUT = Math.round(Core.P.CUT_SEC * FS);
 const CUT_MANUAL = Math.round(0.3 * FS);   // 수동 모드 종료 시 버려지는 마지막 0.3초
@@ -407,7 +407,7 @@ function metaOf(rec) {
   const m = analysisOf(rec).m;
   return {
     id: rec.id, name: rec.name || "", startedAt: rec.startedAt, duration: m.duration, demo: !!rec.demo, imported: !!rec.imported, hasLat: !!rec.lat,
-    accPeak: m.accPeak, accMax: m.accMax, decMax: m.decMax, latA95: m.vibL ? m.vibL.a95 : null, speedMax: m.speedMax, overall: m.eval.overall, updatedAt: rec.updatedAt || Date.now(), evalVer: Core.EVAL_VER,
+    accPeak: m.accPeak, accMax: m.accMax, decMax: m.decMax, latA95: m.vibL ? m.vibL.a95 : null, speedMax: m.speedMax, overall: m.eval.overall, updatedAt: rec.updatedAt || Date.now(), evalVer: Core.EVAL_VER, srcKey: rec.srcKey || null,
   };
 }
 const store = {
@@ -428,12 +428,15 @@ const store = {
       tx.oncomplete = () => res(r && r.result); tx.onerror = () => rej(tx.error);
     });
   },
-  async put(rec) {
+  async put(rec, opt) {
     rec.updatedAt = rec.updatedAt || Date.now();
     const meta = metaOf(rec);
-    if (!this.db) { this.mem.set(rec.id, { rec, meta }); return; }
-    await this.req("rides", "readwrite", s => s.put(rec));
-    await this.req("meta", "readwrite", s => s.put(meta));
+    if (!this.db) this.mem.set(rec.id, { rec, meta });
+    else {
+      await this.req("rides", "readwrite", s => s.put(rec));
+      await this.req("meta", "readwrite", s => s.put(meta));
+    }
+    if (!(opt && opt.quiet) && typeof gsync !== "undefined") gsync.touched(rec.id, false);   // 기기 연동 (2026-11-25)
   },
   async list() {
     let a = this.db ? await this.req("meta", "readonly", s => s.getAll()) : [...this.mem.values()].map(v => v.meta);
@@ -442,7 +445,7 @@ const store = {
     for (let i = 0; i < a.length; i++) {
       if (a[i].evalVer === Core.EVAL_VER) continue;
       const rec = await this.get(a[i].id);
-      if (rec) { await this.put(rec); a[i] = metaOf(rec); }
+      if (rec) { await this.put(rec, { quiet: true }); a[i] = metaOf(rec); }
     }
     return a.sort((x, y) => y.startedAt - x.startedAt);
   },
@@ -450,10 +453,13 @@ const store = {
     if (!this.db) { const m = this.mem.get(id); return m ? m.rec : null; }
     return (await this.req("rides", "readonly", s => s.get(id))) || null;
   },
-  async del(id) {
-    if (!this.db) { this.mem.delete(id); return; }
-    await this.req("rides", "readwrite", s => s.delete(id));
-    await this.req("meta", "readwrite", s => s.delete(id));
+  async del(id, opt) {
+    if (!this.db) this.mem.delete(id);
+    else {
+      await this.req("rides", "readwrite", s => s.delete(id));
+      await this.req("meta", "readwrite", s => s.delete(id));
+    }
+    if (!(opt && opt.quiet) && typeof gsync !== "undefined") gsync.touched(id, true);        // 다른 기기에서도 지움
   },
   async rename(id, name) {
     const rec = await this.get(id); if (!rec) return null;
@@ -611,7 +617,7 @@ const ctl = {
     home.render();
     if (n < FS) { toast("측정 시간이 너무 짧아 저장하지 않았어요."); return; }
     if (reason === "abnormal") { toast("비정상적인 흔들림이 감지되어 측정을 종료했어요.", 4200); try { navigator.vibrate && navigator.vibrate(60); } catch (e) { /* 무시 */ } }
-    const rec = { id: "ride_" + this.startedAt, name: demo ? "데모 측정" : "", startedAt: this.startedAt, rate: FS, demo,
+    const rec = { id: `ride_${this.startedAt}_${Math.random().toString(36).slice(2, 6)}`, name: demo ? "데모 측정" : "", startedAt: this.startedAt, rate: FS, demo,
       vert: Float32Array.from(this.vert.slice(0, n)), lat: Float32Array.from(this.lat.slice(0, n)), updatedAt: Date.now(),
       baro: baroSamples ? baroSamples.filter(b => b.t <= n / FS) : null };
     if (segs.length > 1) rec.segs = segs;
@@ -879,9 +885,12 @@ const records = {
   async importFiles(files) {
     if (!files.length) return;
     if (!(await confirmDlg(`${files.length}개 파일을 가져올까요?`, ""))) return;
-    let ok = 0; const bad = [], notRide = [];
+    let ok = 0, same = 0; const bad = [], notRide = [];
+    const have = new Set((await store.list()).map(m => m.srcKey).filter(Boolean));
     for (const f of files) {
       try {
+        const srcKey = await fileKey(f.name, f.size);               // 이름과 용량이 모두 같으면 같은 파일 (2026-11-25)
+        if (have.has(srcKey)) { same++; continue; }
         const buf = await f.arrayBuffer();
         let text; try { text = new TextDecoder("utf-8", { fatal: true }).decode(buf); } catch (e) { text = new TextDecoder("euc-kr").decode(buf); }
         const isTxt = /\.txt$/i.test(f.name);
@@ -889,11 +898,11 @@ const records = {
         const name = f.name.replace(/\.(csv|txt)$/i, "");
         const startedAt = imp.startedAt || f.lastModified || Date.now();
         const rec = { id: `ride_${startedAt}_${Math.random().toString(36).slice(2, 7)}`, name, startedAt, rate: imp.rate, imported: true,
-          vert: imp.vert, lat: imp.lat, updatedAt: Date.now() };
+          vert: imp.vert, lat: imp.lat, updatedAt: Date.now(), src: { name: f.name, size: f.size }, srcKey };
         if (imp.segs) rec.segs = imp.segs;
         if (imp.baro) rec.baro = imp.baro;
         if (imp.zOnly) rec.zOnly = true;
-        await store.put(rec); ok++;
+        await store.put(rec); have.add(srcKey); ok++;
       } catch (e) { (e && e.code === Core.TXT_BAD ? notRide : bad).push(f.name); }
     }
     await this.render();
@@ -902,7 +911,9 @@ const records = {
       dialog(`<h3>승차감 기록이 아닌 것 같아요.</h3><p>${esc(notRide.slice(0, 3).join(", "))}${notRide.length > 3 ? ` 외 ${notRide.length - 3}개` : ""}</p>
         <div class="acts"><button class="solid" id="dOk">확인</button></div>`, (b, close) => { b.querySelector("#dOk").onclick = close; });
     }
-    if (ok || bad.length) toast(bad.length ? `${ok}개를 가져왔어요. ${bad.length}개는 형식이 맞지 않았어요: ${bad.slice(0, 2).join(", ")}${bad.length > 2 ? " 외" : ""}` : `${ok}개 파일을 가져왔어요.`, 4500);
+    if (same && !ok && !bad.length) toast(`이미 있는 파일이에요 (${same}개).`, 3600);
+    else if (same) toast(`${ok}개를 가져왔어요. ${same}개는 이미 있는 파일이라 건너뛰었어요.`, 4200);
+    else if (ok || bad.length) toast(bad.length ? `${ok}개를 가져왔어요. ${bad.length}개는 형식이 맞지 않았어요: ${bad.slice(0, 2).join(", ")}${bad.length > 2 ? " 외" : ""}` : `${ok}개 파일을 가져왔어요.`, 4500);
   },
 };
 
@@ -1371,6 +1382,14 @@ const installer = {
   stagger($(".nav")); stagger($("#pHome"));
   installer.init();
   heal.init();
+  gsync.init();                                                   // 기기 연동 (구글 드라이브)
+  $("#syncBtn").onclick = () => gsync.connect();
+  $("#syncNow").onclick = () => gsync.now();
+  $("#syncTrash").onclick = () => gsync.trash();
+  $("#syncOff").onclick = () => gsync.disconnect();
+  $("#syncLine").onclick = () => gsync.now();
+  $("#navSettings").addEventListener("click", () => gsync.preload());
+  $("#navRecords").addEventListener("click", () => { if (gsync.on && gsync.tokenOk() && Date.now() - gsync.last > 60e3) gsync.soon(200); });
   $("#btnImport").onclick = () => $("#fileIn").click();
   addEventListener("resize", () => nav.moveOrb());
   requestAnimationFrame(() => { $("#navOrb").classList.add("ready"); nav.moveOrb(); });

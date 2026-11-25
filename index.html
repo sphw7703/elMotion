@@ -202,6 +202,17 @@ canvas.chart { display: block; width: 100%; height: 150px; touch-action: pan-y; 
 .set-row { display: flex; align-items: center; gap: 12px; }
 .set-row .t { flex: 1; }
 .set-row .t p { margin: 2px 0 0; font-size: 12.5px; color: var(--ink-2); }
+/* 기기 연동 (2026-11-25) */
+#syncCard [hidden], .sync-line[hidden] { display: none !important; }
+.sync-acts { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.sync-line { display: block; margin: 0 auto 10px; padding: 6px 14px; border: 0; border-radius: 999px; background: transparent; color: var(--ink-2); font: inherit; font-size: 12.5px; }
+.sync-line.tap { background: var(--glass-bg, rgba(255,255,255,.08)); color: var(--ink); cursor: pointer; }
+.trash-list { max-height: 50vh; overflow: auto; margin: 4px 0 8px; }
+.trash-row { display: flex; align-items: center; gap: 10px; padding: 10px 0; border-bottom: 1px solid var(--line, rgba(127,127,127,.18)); }
+.trash-row .t { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.trash-row .t b { font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.trash-row .t span { font-size: 12px; color: var(--ink-2); }
+.trash-list .empty { color: var(--ink-2); text-align: center; }
 .row-btn[hidden] { display: none; }
 .row-btn { width: 100%; display: flex; align-items: center; justify-content: space-between; padding: 16px; margin-bottom: 8px; font-weight: 800; color: var(--ink); }
 .row-btn svg { color: var(--ink-3); }
@@ -527,6 +538,7 @@ body.selecting #recList { padding-bottom: 150px; }
           <button class="round-btn pop" id="btnExport" aria-label="파일 내보내기" title="파일 내보내기"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 14V3m0 0L8 7m4-4l4 4"/><path d="M4 15v3a3 3 0 003 3h10a3 3 0 003-3v-3"/></svg></button>
           <button class="round-btn pop" id="btnDelete" aria-label="기록 삭제" title="기록 삭제"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14"/></svg></button>
         </div>
+        <button class="sync-line" id="syncLine" hidden></button>
         <div class="rec-list" id="recList"></div>
       </section>
 
@@ -564,6 +576,15 @@ body.selecting #recList { padding-bottom: 150px; }
             <div class="t"><h3 style="margin:0">기압 기록 (개발용)</h3><p id="baroDesc"></p></div>
           </div>
         </div>
+        <div class="set-card glass" id="syncCard">
+          <div class="set-row">
+            <div class="t"><h3 style="margin:0">기기 연동</h3><p id="syncDesc"></p></div>
+            <button class="pill-btn primary" id="syncBtn" hidden>구글로 연결</button>
+          </div>
+          <div class="sync-acts" id="syncActs" hidden>
+            <button class="pill-btn" id="syncNow">지금 맞추기</button><button class="pill-btn" id="syncTrash">지운 기록</button><button class="pill-btn" id="syncOff">연결 끊기</button>
+          </div>
+        </div>
         <button class="row-btn glass" id="btnInstall" hidden>앱으로 설치하기 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M9 6l6 6-6 6"/></svg></button>
         <button class="row-btn glass" id="btnTerms">약관 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M9 6l6 6-6 6"/></svg></button>
         <p class="copy">elMotion <span id="appVer"></span><br>© Copyright. 로엔 (2026). All rights reserved.</p>
@@ -589,6 +610,7 @@ body.selecting #recList { padding-bottom: 150px; }
 <input type="file" id="fileIn" accept=".csv,text/csv,.txt,text/plain" multiple hidden>
 
 <script src="core.js"></script>
+<script src="sync.js"></script>
 <script src="app.js"></script>
 <script src="render.js"></script>
 </body>
