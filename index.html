@@ -470,6 +470,44 @@ body.selecting #recList { padding-bottom: 150px; }
     radial-gradient(ellipse 26% 15% at 38% 21%, rgba(255, 255, 255, .55), transparent 70%),
     radial-gradient(ellipse 47.6% 46% at 50% 49.8%, var(--gf-body) 0 86%, var(--gf-rim) 95%, var(--gf-edge) 99%, transparent 100%); }
 :root.no-glass .sphere .glass-top, :root.no-glass .mini::after { background: radial-gradient(ellipse 26% 15% at 38% 21%, rgba(255, 255, 255, .5), transparent 70%); }
+/* ═════ 가로 화면 (태블릿 등 가로가 더 긴 화면, 2026-11-25) ═════ */
+* { scrollbar-width: none; }
+*::-webkit-scrollbar { display: none; width: 0; height: 0; }   /* 오른쪽의 얇은 회색 스크롤 막대 숨김 */
+:root.wide .app { max-width: none; }
+:root.wide .page { padding: 0 44px 24px; }
+:root.wide .nav { align-self: center; width: 540px; }
+:root.wide .live-pill { font-size: 22px; gap: 12px; padding: 6px 4px; }
+:root.wide .live-pill i { width: 12px; height: 12px; }
+:root.wide .single .caption { font-size: 46px; letter-spacing: -1px; min-height: 60px; }
+:root.wide .single .sub { font-size: 18px; max-width: 560px; }
+:root.wide .triple { flex: 1; flex-direction: row; justify-content: center; align-items: center; gap: 5vw; padding: 0; }
+:root.wide .triple .lbl { font-size: 19px; margin-bottom: 6px; }
+:root.wide #homeBody .stat-row { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+:root.wide .charts { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+:root.wide canvas.chart { height: 200px; }
+:root.wide .rec-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(420px, 1fr)); gap: 12px; }
+:root.wide .sheet-in { max-width: 1280px; padding-left: 44px; padding-right: 44px; }
+:root.wide .sheet .top h2 { font-size: 24px; }
+:root.wide .sheet .top .tt div { font-size: 14px; }
+:root.wide .ai-box { padding: 18px 22px; }
+:root.wide .ai-box p { font-size: 20px; line-height: 30px; }
+:root.wide .d-rows { flex-direction: row; justify-content: space-around; align-items: flex-start; gap: 20px; padding-top: 10px; }
+:root.wide .d-row { flex: 1; grid-template-columns: 1fr; justify-items: center; text-align: center; gap: 12px; border-top: 0; padding: 8px 0; }
+:root.wide .d-row .lbl { font-size: 17px; margin-bottom: 8px; }
+:root.wide .d-row .ev b { font-size: 21px; }
+:root.wide .d-row .ev p { font-size: 14.5px; }
+:root.wide .m6 { grid-template-columns: repeat(9, minmax(0, 1fr)); gap: 10px; }
+:root.wide .m6-card { min-height: 150px; padding: 14px 12px 12px; }
+:root.wide .m6-card .l { font-size: 13.5px; }
+:root.wide .m6-card .v { font-size: 26px; }
+:root.wide .m6-card .v2 b { font-size: 21px; }
+:root.wide .m6-card .e { font-size: 12.5px; }
+:root.wide .m6-card .e.two span { white-space: normal; font-size: 12px; }
+:root.wide #detailIn canvas.chart { height: 240px !important; }
+:root.wide .chart-card .h b { font-size: 17px; }
+.vid-bar { height: 8px; border-radius: 4px; background: var(--surface-2); overflow: hidden; margin: 4px 0 6px; }
+.vid-bar i { display: block; height: 100%; width: 0; background: var(--navy-grad); transition: width .2s; }
+#appVer { cursor: default; }
 </style>
 </head>
 <body>
@@ -549,5 +587,6 @@ body.selecting #recList { padding-bottom: 150px; }
 
 <script src="core.js"></script>
 <script src="app.js"></script>
+<script src="render.js"></script>
 </body>
 </html>

@@ -4,7 +4,7 @@
 /* ───────── 상수 ───────── */
 const FS = Core.FS;
 /* 앱 버전 (2026-11-25 사용자 확정): 0.큰 기능 묶음.고친 횟수 — 웹 앱 확정 때 1.0.0, 안드로이드 앱 때 2.0.0 */
-const APP_VERSION = "0.9.5";
+const APP_VERSION = "0.10.0";
 const LEGEND = { acc: 1.5, lat: 30, latA: 20, spd: 600 };   // 물 높이 범례 (화면에 표시하지 않음). lat: 실시간 p-p, latA: 기록의 |A95|
 const CUT = Math.round(Core.P.CUT_SEC * FS);
 const CUT_MANUAL = Math.round(0.3 * FS);   // 수동 모드 종료 시 버려지는 마지막 0.3초
@@ -19,8 +19,13 @@ const p2 = n => String(n).padStart(2, "0");
 const fmtDate = ms => { const d = new Date(ms); return `${d.getFullYear()}년 ${d.getMonth() + 1}월 ${d.getDate()}일 (${"일월화수목금토"[d.getDay()]}) ${p2(d.getHours())}:${p2(d.getMinutes())}`; };
 const fmtDur = s => s >= 60 ? `${Math.floor(s / 60)}분 ${p2(Math.floor(s % 60))}초` : `${s.toFixed(1)}초`;
 const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
+/* 가로 화면 (태블릿 등): 가로가 세로보다 길고 충분히 넓으면 가로 전용 배치 */
+const WIDE_MQ = window.matchMedia ? matchMedia("(orientation: landscape) and (min-width: 820px) and (min-height: 400px)") : null;
+const isWide = () => !!(WIDE_MQ && WIDE_MQ.matches);
+document.documentElement.classList.toggle("wide", isWide());
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const ICON = {
+  film: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="13" height="14" rx="2.5"/><path d="M16 10l5-3v10l-5-3z"/></svg>',
   edit: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 013 3L7 19l-4 1 1-4z"/></svg>',
   del: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14"/></svg>',
   back: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>',
@@ -645,7 +650,8 @@ const home = {
       requestAnimationFrame(() => this.centerCaption());
     } else if (kind === "live-simple") {
       const avail = innerHeight - 60 - 70 - 110 - 3 * 30;
-      const size = Math.round(clamp(avail / 3, 104, 176));
+      // 가로 화면: 세 게이지를 옆으로 나란히, 화면 높이에 맞춰 크게
+      const size = isWide() ? Math.round(clamp(Math.min((innerHeight - 260) * 0.95, (innerWidth - 160) / 3.6), 150, 340)) : Math.round(clamp(avail / 3, 104, 176));
       body.innerHTML = `<div class="triple">${[["acc", "가감속도"], ["lat", "좌우 흔들림"], ["spd", "현재 속력"]].map(([k, t], i) =>
         `<div class="item fade-in" style="animation-delay:${i * 0.1}s"><div class="lbl">${t}</div><div id="tr-${k}"></div></div>`).join("")}</div>`;
       this.trip = {};
@@ -959,6 +965,7 @@ const detail = {
     charts.clear(box);
     box.innerHTML = `<div class="top" id="dHead"><button class="round-btn pop" id="dBack" aria-label="뒤로">${ICON.back}</button>
         <div class="tt"><h2></h2><div></div></div>
+        ${owner.on && isWide() ? `<button class="round-btn pop" id="dVid" aria-label="영상 만들기" title="영상 만들기 (1920×1080 · 60프레임)">${ICON.film}</button>` : ""}
         <button class="round-btn pop" id="dEdit" aria-label="이름 변경">${ICON.edit}</button>
         <button class="round-btn pop del" id="dDel" aria-label="기록 삭제">${ICON.del}</button></div>
       <div class="ai-box glass fade-in"><span class="ai-glow" aria-hidden="true"><i></i></span><span class="ai-chip">${ICON.aiStar}<span class="ai-t">AI 평가</span></span><p>${esc(ev.overall)}</p></div>
@@ -969,6 +976,7 @@ const detail = {
     $("#dBack").onclick = () => nav.back();
     $("#dEdit").onclick = () => records.renameDlg(r.id, r.name);
     $("#dDel").onclick = () => this.remove();
+    if ($("#dVid")) $("#dVid").onclick = () => videoMaker.run(r);
     $("#dTog").onclick = () => { if (this.detail) nav.back(); else { this.setDetail(true); nav.push("recordfull"); } };
     stagger(box);
     if (!this.detail) this.simple(A); else this.full(A);
@@ -992,7 +1000,7 @@ const detail = {
         : { k: "lat", lbl: "좌우 흔들림", lv: 0, n1: "—", u: "gal", b: { lv: "n", t: "기록이 없어요." }, p: "" },
       { k: "spd", lbl: "속력", lv: m.speedMax / LEGEND.spd, n1: m.speedMax.toFixed(1), u: "m/min", b: ev.speed, p: "" },
     ];
-    const size = Math.round(clamp(innerWidth * 0.36, 120, 160));
+    const size = isWide() ? Math.round(clamp(Math.min(innerHeight * 0.4, innerWidth / 5.2), 160, 280)) : Math.round(clamp(innerWidth * 0.36, 120, 160));
     body.innerHTML = `<div class="d-rows">${rows.map((r, i) => `<div class="d-row fade-in" style="animation-delay:${0.1 + i * 0.1}s">
         <div><div class="lbl">${r.lbl}</div><div id="ds-${r.k}"></div></div>
         <div class="ev"><b class="lv${r.b.lv}">${esc(r.b.t)}</b>${r.p ? `<p>${esc(r.p)}</p>` : ""}</div></div>`).join("")}</div>`;
@@ -1278,9 +1286,16 @@ const heal = {
     });
     addEventListener("pageshow", e => { if (e.persisted) this.run(true); });
     addEventListener("resize", () => { clearTimeout(this.t); this.t = setTimeout(() => this.run(false), 250); });
+    if (WIDE_MQ && WIDE_MQ.addEventListener) WIDE_MQ.addEventListener("change", () => this.run(true));
     setInterval(() => { if (!document.hidden) this.run(false); }, 60000);
   },
   run(force) {
+    const wide = isWide(), flip = wide !== document.documentElement.classList.contains("wide");
+    if (flip) {
+      document.documentElement.classList.toggle("wide", wide);
+      home.layout = ""; home.render();                                   // 측정 중이어도 배치를 다시 (실시간 값은 다음 틱에 다시 채워짐)
+      if (nav.overlay === "record" && detail.rec) detail.render();
+    }
     const resized = Math.abs(innerWidth - this.w) > 40 || Math.abs(innerHeight - this.h) > 80;
     this.w = innerWidth; this.h = innerHeight;
     nav.place(); nav.moveOrb(); home.centerCaption();
@@ -1321,7 +1336,7 @@ const installer = {
   if (theme.mq) theme.mq.addEventListener("change", () => { if (theme.pref === "system") theme.apply(); });
   await store.open();
   settings.init();
-  { const v = $("#appVer"); if (v) v.textContent = APP_VERSION; }
+  { const v = $("#appVer"); if (v) { v.textContent = APP_VERSION; v.onclick = () => owner.dialog(); } }   // 버전 글자: 주인 코드 입력
   ctl.init();
   baro.connectBridge();
   glassGuard.check();
