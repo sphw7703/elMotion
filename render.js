@@ -38,7 +38,7 @@ const videoMaker = (() => {
   // 쫀득한 움직임 (2026-11-25 사용자 요청): 살짝 넘쳤다가 착 붙는 용수철
   const spring = t => (t <= 0 ? 0 : t >= 1 ? 1 : 1 - Math.exp(-6 * t) * Math.cos(9.5 * t) * (1 - t));   // 넘침 약 9%
   const glide = t => (t <= 0 ? 0 : t >= 1 ? 1 : 1 - Math.exp(-7 * t) * Math.cos(6.4 * t) * (1 - t * t));                         // 큰 이동: 넘침 약 3%
-  const KEY = "#00FF00";   // 크로마키 배경 (초록)
+  // 배경: 크로마키 대신 투명으로 그리고, 색 영상 + 흑백 마스크 영상 두 개로 내보낸다 (2026-11-25, 초록 글자가 회색으로 빠지던 문제)
   const seg = (t, a, b) => clamp((t - a) / (b - a), 0, 1);
   const lerp = (a, b, k) => a + (b - a) * k;
 
@@ -77,6 +77,7 @@ const videoMaker = (() => {
   const KIND = { acc: ["#6E80D4", "#2C46BE", "#17289A"], lat: ["#BBA3B8", "#94657F", "#8A3A5A"], spd: ["#A6A3C8", "#65518E", "#452F74"] };
   const LV = { light: ["#1E8C5C", "#2E8B3E", "#A87800", "#C9580E", "#C53030"], dark: ["#5FD3A2", "#8CD99A", "#F2C94C", "#F5A15A", "#F08484"] };
   const F = (w, px) => `${w} ${px}px NanumSquareNeo, "Apple SD Gothic Neo", "Malgun Gothic", sans-serif`;
+  function rrPath(g, x, y, w, h, r) { g.moveTo(x + r, y); g.arcTo(x + w, y, x + w, y + h, r); g.arcTo(x + w, y + h, x, y + h, r); g.arcTo(x, y + h, x, y, r); g.arcTo(x, y, x + w, y, r); g.closePath(); }
   function rr(g, x, y, w, h, r) { g.beginPath(); g.moveTo(x + r, y); g.arcTo(x + w, y, x + w, y + h, r); g.arcTo(x + w, y + h, x, y + h, r); g.arcTo(x, y + h, x, y, r); g.arcTo(x, y, x + w, y, r); g.closePath(); }
   function wrap(g, text, maxW) {
     const words = String(text).split(" "), lines = []; let cur = "";
@@ -86,7 +87,7 @@ const videoMaker = (() => {
   function loadImg(src) { return new Promise(ok => { const im = new Image(); im.onload = () => ok(im); im.onerror = () => ok(null); im.src = src; }); }
 
   function background(g, P) {
-    if (P.key) { g.fillStyle = KEY; g.fillRect(0, 0, W, H); return; }
+    if (P.key) { g.clearRect(0, 0, W, H); return; }
     if (P.dark) {
       const lg = g.createLinearGradient(0, 0, 0, H); lg.addColorStop(0, "#0E1325"); lg.addColorStop(1, "#090C16"); g.fillStyle = lg; g.fillRect(0, 0, W, H);
       const glow = (cx, cy, rx, ry, col) => { g.save(); g.translate(cx, cy); g.scale(1, ry / rx); const r = g.createRadialGradient(0, 0, 0, 0, 0, rx); r.addColorStop(0, col); r.addColorStop(.7, "rgba(0,0,0,0)"); g.fillStyle = r; g.fillRect(-rx, -rx, 2 * rx, 2 * rx); g.restore(); };
@@ -137,83 +138,74 @@ const videoMaker = (() => {
     g.save(); g.translate(cx - s / 2, cy - s / 2); g.scale(s / 15, s / 15.1); g.translate(-4.5, -2.5);
     g.fill(new Path2D("M12 2.5c.6 4.6 2.9 6.9 7.5 7.5v.1c-4.6.6-6.9 2.9-7.5 7.5h-.1c-.6-4.6-2.9-6.9-7.5-7.5V10c4.6-.6 6.9-2.9 7.5-7.5z")); g.restore();
   }
-  /** AI 평가 상자 테두리 (빙글 도는 무지개 + 번지는 빛 + 유리 판) */
-  // 둥근 상자 둘레를 같은 길이로 나눈 점들 (시계 방향, 위 가운데에서 시작)
-  function ringPts(x, y, w, h, r, N) {
-    const sw = w - 2 * r, sh = h - 2 * r, q = Math.PI * r / 2, per = 2 * sw + 2 * sh + 4 * q, pts = [];
-    const at = d => {
-      d = ((d % per) + per) % per;
-      if (d < sw / 2) return [x + w / 2 + d, y]; d -= sw / 2;
-      if (d < q) { const a = -Math.PI / 2 + d / r; return [x + w - r + r * Math.cos(a), y + r + r * Math.sin(a)]; } d -= q;
-      if (d < sh) return [x + w, y + r + d]; d -= sh;
-      if (d < q) { const a = d / r; return [x + w - r + r * Math.cos(a), y + h - r + r * Math.sin(a)]; } d -= q;
-      if (d < sw) return [x + w - r - d, y + h]; d -= sw;
-      if (d < q) { const a = Math.PI / 2 + d / r; return [x + r + r * Math.cos(a), y + h - r + r * Math.sin(a)]; } d -= q;
-      if (d < sh) return [x, y + h - r - d]; d -= sh;
-      if (d < q) { const a = Math.PI + d / r; return [x + r + r * Math.cos(a), y + r + r * Math.sin(a)]; } d -= q;
-      return [x + r + d, y];
-    };
-    for (let i = 0; i <= N; i++) pts.push(at(per * i / N));
-    return pts;
-  }
-  const hexRgb = c => [parseInt(c.slice(1, 3), 16), parseInt(c.slice(3, 5), 16), parseInt(c.slice(5, 7), 16)];
-  // 무지개를 둘레 길이에 고르게 펴서 칠한 테두리 (원뿔 그라데이션은 긴 상자에서 색이 한쪽에 몰려서 바꿈)
-  function rainbowRing(g, C, pts, lw, shift) {
-    const n = C.length, R = C.map(hexRgb), N = pts.length - 1;
-    g.lineWidth = lw; g.lineCap = "round";
-    for (let i = 0; i < N; i++) {
-      let u = ((i + .5) / N * n * 1 + shift * n) % n; if (u < 0) u += n;      // 한 바퀴에 무지개 한 번
-      const k = Math.floor(u), f = u - k, A = R[k], B = R[(k + 1) % n], sm = f * f * (3 - 2 * f);
-      g.strokeStyle = `rgb(${A[0] + (B[0] - A[0]) * sm | 0},${A[1] + (B[1] - A[1]) * sm | 0},${A[2] + (B[2] - A[2]) * sm | 0})`;
-      g.beginPath(); g.moveTo(pts[i][0], pts[i][1]); g.lineTo(pts[i + 1][0], pts[i + 1][1]); g.stroke();
-    }
-  }
-  let glowCv = null;
-  /** AI 평가 상자: 무지개 빛 번짐 + 다크 배경 + 또렷한 무지개 테두리 (2026-11-25 보완) */
+  /* AI 평가 상자 — 앱 다크 모드의 .ai-box.glass를 그대로 옮김 (2026-11-25 사용자 지정 시안)
+     앱(가로 화면)보다 약 1.7배 큼: 테두리 1.5px → 2.6, 번지는 빛 띠 4px → 7, 흐림 9px → 15, 둥근 모서리 22px → 34 */
+  const AS = 1.7;
+  const conicOf = (g, C, cx, cy, t) => {            // 앱의 conic-gradient(from --ai-a …), 6초에 한 바퀴
+    const cg = g.createConicGradient((t / 6) * Math.PI * 2 - Math.PI / 2, cx, cy);
+    [...C, C[0]].forEach((c, i) => cg.addColorStop(i / C.length, c)); return cg;
+  };
+  const ringPath = (g, x, y, w, h, r, out, band) => {   // 상자 둘레의 띠 (바깥 out만큼 나가고 안으로 band 두께)
+    g.beginPath(); rrPath(g, x - out, y - out, w + 2 * out, h + 2 * out, r + out);
+    rrPath(g, x - out + band, y - out + band, w + 2 * out - 2 * band, h + 2 * out - 2 * band, Math.max(1, r + out - band));
+  };
+  const rgba = (c, a) => { const n = parseInt(c.slice(1), 16); return `rgba(${n >> 16 & 255},${n >> 8 & 255},${n & 255},${a})`; };
   function aiFrame(g, P, x, y, w, h, t) {
-    const r = 34, C = P.colors, shift = -t / 6, pts = ringPts(x, y, w, h, r, 360);
-    // 1) 빛 번짐: 따로 그린 두꺼운 테두리를 넓게·좁게 두 번 흐려 얹는다
-    if (!glowCv) { glowCv = document.createElement("canvas"); glowCv.width = OW; glowCv.height = OH; }
-    const og = glowCv.getContext("2d"), M = g.getTransform();
-    og.setTransform(1, 0, 0, 1, 0, 0); og.clearRect(0, 0, OW, OH); og.setTransform(M);
-    rainbowRing(og, C, pts, 22, shift);
-    const p0 = M.transformPoint(new DOMPoint(x - 140, y - 140)), p1 = M.transformPoint(new DOMPoint(x + w + 140, y + h + 140));
-    const sx = Math.max(0, Math.floor(p0.x)), sy = Math.max(0, Math.floor(p0.y)), ex = Math.min(OW, Math.ceil(p1.x)), ey = Math.min(OH, Math.ceil(p1.y));
-    const sc = Math.hypot(M.a, M.b), a0 = g.globalAlpha;
-    if (ex > sx && ey > sy) {
-      g.save(); g.setTransform(1, 0, 0, 1, 0, 0);
-      g.filter = `blur(${(40 * sc).toFixed(1)}px) saturate(190%)`; g.globalAlpha = a0; g.drawImage(glowCv, sx, sy, ex - sx, ey - sy, sx, sy, ex - sx, ey - sy);
-      g.filter = `blur(${(40 * sc).toFixed(1)}px) saturate(190%)`; g.drawImage(glowCv, sx, sy, ex - sx, ey - sy, sx, sy, ex - sx, ey - sy);
-      g.filter = `blur(${(13 * sc).toFixed(1)}px) saturate(170%)`; g.drawImage(glowCv, sx, sy, ex - sx, ey - sy, sx, sy, ex - sx, ey - sy);
-      g.filter = "none"; g.restore();
-    }
-    // 2) 상자 속: 다크 모드 배경색 + 앱처럼 모서리에 무지개 빛이 살짝 고임
-    g.save(); rr(g, x, y, w, h, r); g.fillStyle = "#0F131B"; g.fill(); g.clip();
-    const tint = (cx, cy, rad, c, al) => { const rg = g.createRadialGradient(cx, cy, 0, cx, cy, rad); const [R0, G0, B0] = hexRgb(c);
-      rg.addColorStop(0, `rgba(${R0},${G0},${B0},${al})`); rg.addColorStop(1, `rgba(${R0},${G0},${B0},0)`); g.fillStyle = rg; g.fillRect(x, y, w, h); };
-    tint(x + w, y + h, Math.min(w * .5, 700), C[2], .16);
-    tint(x, y, Math.min(w * .4, 520), C[0], .12);
+    const r = 34, C = P.colors, a0 = g.globalAlpha, M = g.getTransform(), sc = Math.hypot(M.a, M.b);
+    const cx = x + w / 2, cy = y + h / 2;
+    // 1) 판: 다크 모드 배경색
+    g.save(); rr(g, x, y, w, h, r); g.fillStyle = "#0F131B"; g.fill(); g.restore();
+    // 2) 번지는 빛 (.ai-glow): 무지개 띠를 흐려 테두리 안팎으로 은은하게 — 판 위에 얹어 안쪽 빛 번짐이 보이게
+    g.save(); g.filter = `blur(${(9 * AS * sc).toFixed(1)}px)`; g.globalAlpha = a0 * .75;
+    ringPath(g, x, y, w, h, r, 1 * AS, 4 * AS + 1 * AS); g.fillStyle = conicOf(g, C, cx, cy, t); g.fill("evenodd"); g.restore();
+    // 3) 유리 판(surface) + 모서리에 고인 색: 오른쪽 아래 c3 14%, 왼쪽 위 c1 10%
+    g.save(); rr(g, x, y, w, h, r); g.clip();
+    g.fillStyle = "rgba(255,255,255,.055)"; g.fillRect(x, y, w, h);
+    const tint = (ex, ey, rx, ry, c, al) => { g.save(); g.translate(ex, ey); g.scale(1, ry / rx); const rg = g.createRadialGradient(0, 0, 0, 0, 0, rx);
+      rg.addColorStop(0, rgba(c, al)); rg.addColorStop(.6, rgba(c, 0)); g.fillStyle = rg; g.fillRect(-rx, -rx, 2 * rx, 2 * rx); g.restore(); };
+    tint(x + w, y + h, w * .9, h * 1.2, C[2], .14);
+    tint(x, y, w * .7, h * .9, C[0], .10);
     g.restore();
-    // 3) 또렷한 테두리 + 안쪽 얇은 빛
-    g.save(); rainbowRing(g, C, pts, 4, shift); g.restore();
-    g.save(); rr(g, x + 3, y + 3, w - 6, h - 6, r - 3); g.lineWidth = 1; g.strokeStyle = "rgba(255,255,255,.10)"; g.stroke(); g.restore();
+    // 4) 또렷한 무지개 테두리 (.ai-box.glass::before): 바깥 1px, 두께 1.5px
+    g.save(); ringPath(g, x, y, w, h, r, 1 * AS, 1.5 * AS); g.fillStyle = conicOf(g, C, cx, cy, t); g.fill("evenodd"); g.restore();
   }
   /** AI 평가 내용 (유리 칩 + 글). (x, y): 상자 왼쪽 위, k: 배율 */
   function aiContent(g, P, x, y, t, L, k) {
     const C = P.colors;
     g.save(); g.translate(x, y); g.scale(k, k);
     const chipH = 52, cx0 = 30, cy0 = 26; g.font = F(800, 22); const tw = g.measureText("AI 평가").width, chipW = 22 + 24 + 9 + tw + 22;
-    g.save(); rr(g, cx0, cy0, chipW, chipH, chipH / 2); g.clip();
-    g.fillStyle = P.dark ? "#191428" : "#F4F2FB"; g.fillRect(cx0, cy0, chipW, chipH);
-    g.filter = "blur(10px)"; const a0 = g.globalAlpha;
-    C.forEach((c, i) => { const a = t * .7 + i / C.length * Math.PI * 2; const bx = cx0 + chipW / 2 + Math.cos(a) * chipW * .32, by = cy0 + chipH / 2 + Math.sin(a) * chipH * .45;
-      const rg = g.createRadialGradient(bx, by, 0, bx, by, chipW * .36); rg.addColorStop(0, c); rg.addColorStop(1, "rgba(0,0,0,0)"); g.globalAlpha = a0 * (P.dark ? .85 : .95); g.fillStyle = rg; g.fillRect(cx0 - 20, cy0 - 20, chipW + 40, chipH + 40); });
-    g.filter = "none"; g.globalAlpha = a0;
-    const gl = g.createLinearGradient(0, cy0, 0, cy0 + chipH); gl.addColorStop(0, P.dark ? "rgba(255,255,255,.28)" : "rgba(255,255,255,.62)"); gl.addColorStop(.5, "rgba(255,255,255,0)"); gl.addColorStop(1, "rgba(255,255,255,.2)");
-    g.fillStyle = gl; g.fillRect(cx0, cy0, chipW, chipH); g.restore();
-    rr(g, cx0, cy0, chipW, chipH, chipH / 2); g.lineWidth = 2; g.strokeStyle = P.dark ? "rgba(255,225,245,.55)" : "rgba(255,255,255,.8)"; g.stroke();
-    g.fillStyle = P.dark ? "#fff" : "#141C38"; star(g, cx0 + 22 + 12, cy0 + chipH / 2, 24);
-    g.textBaseline = "middle"; g.textAlign = "left"; g.font = F(800, 22); g.fillText("AI 평가", cx0 + 22 + 24 + 9, cy0 + chipH / 2 + 1);
+    const a0 = g.globalAlpha, M = g.getTransform(), sc = Math.hypot(M.a, M.b), R = chipH / 2, ccx = cx0 + chipW / 2, ccy = cy0 + chipH / 2;
+    // 칩 = 앱 다크 모드의 유리 구슬 칩 (2026-11-25 사용자 지정 시안), 앱 30px 칩의 약 1.7배
+    // 바깥 빛: -6px 0 16px -5px c1 75% · 6px 2px 16px -5px c4 80%
+    const glow = (dx, dy, c, al) => { g.save(); g.filter = `blur(${(8 * AS * sc).toFixed(1)}px)`; g.globalAlpha = a0;
+      const sp = 5 * AS; rr(g, cx0 + sp + dx, cy0 + sp + dy, chipW - 2 * sp, chipH - 2 * sp, R - sp); g.fillStyle = rgba(c, al); g.fill(); g.restore(); };
+    glow(-6 * AS, 0, C[0], .75); glow(6 * AS, 2 * AS, C[3], .8);
+    g.save(); rr(g, cx0, cy0, chipW, chipH, R); g.clip();
+    g.fillStyle = "#191428"; g.fillRect(cx0, cy0, chipW, chipH);
+    // 안에서 번진 색 덩어리 6개가 천천히 소용돌이 (9초에 한 바퀴), blur 6px · saturate 120% · 85%
+    g.save(); g.filter = `blur(${(6 * AS * sc).toFixed(1)}px) saturate(120%)`; g.globalAlpha = a0 * .85;
+    g.translate(ccx, ccy); g.rotate((t / 9) * Math.PI * 2);
+    const B = 150 * AS, blobs = [[.28, .32, 0, .12, .34], [.72, .30, 1, .10, .32], [.70, .70, 4, .12, .34], [.30, .72, 3, .10, .32], [.5, .5, 5, .14, .40], [.5, .12, 2, .08, .28]];
+    blobs.forEach(([px, py, ci, s0, s1]) => {
+      const bx = (px - .5) * B, by = (py - .5) * B, far = Math.hypot(Math.max(px, 1 - px), Math.max(py, 1 - py)) * B;
+      const rg = g.createRadialGradient(bx, by, 0, bx, by, far * s1); rg.addColorStop(0, C[ci]); rg.addColorStop(s0 / s1, C[ci]); rg.addColorStop(1, rgba(C[ci], 0));
+      g.fillStyle = rg; g.fillRect(-B / 2, -B / 2, B, B);
+    });
+    g.restore();
+    // 윗면 광택: .28 → 0 (45%) · 0 (70%) → .12
+    const gl = g.createLinearGradient(0, cy0, 0, cy0 + chipH);
+    gl.addColorStop(0, "rgba(255,255,255,.28)"); gl.addColorStop(.45, "rgba(255,255,255,0)"); gl.addColorStop(.7, "rgba(255,255,255,0)"); gl.addColorStop(1, "rgba(255,255,255,.12)");
+    g.fillStyle = gl; g.fillRect(cx0, cy0, chipW, chipH);
+    // 안쪽 빛: inset 0 0 8px rgba(255,210,240,.35)
+    g.save(); g.filter = `blur(${(4 * AS * sc).toFixed(1)}px)`; rr(g, cx0, cy0, chipW, chipH, R); g.lineWidth = 8 * AS; g.strokeStyle = "rgba(255,210,240,.35)"; g.stroke(); g.restore();
+    g.restore();
+    // 가는 빛 테두리: inset 0 0 0 1px rgba(255,225,245,.55)
+    rr(g, cx0 + AS / 2, cy0 + AS / 2, chipW - AS, chipH - AS, R - AS / 2); g.lineWidth = AS; g.strokeStyle = "rgba(255,225,245,.55)"; g.stroke();
+    // 별 + 글: 흰색, 0 0 6px rgba(255,220,245,.55) 빛
+    g.save(); g.shadowColor = "rgba(255,220,245,.55)"; g.shadowBlur = 6 * AS * sc; g.fillStyle = "#fff";
+    star(g, cx0 + 22 + 12, ccy, 24);
+    g.textBaseline = "middle"; g.textAlign = "left"; g.font = F(800, 22); g.fillText("AI 평가", cx0 + 22 + 24 + 9, ccy + 1);
+    g.restore();
     g.fillStyle = P.ink; g.font = F(800, L.fs); g.textBaseline = "alphabetic";
     L.lines.forEach((l, i) => g.fillText(l, cx0 + chipW + 26, 26 + L.fs * .9 + 6 + i * L.lh));
     g.restore();
@@ -396,45 +388,75 @@ const videoMaker = (() => {
     };
 
     // 모션 블러 (2026-11-25 사용자 요청): 움직이는 구간은 프레임 반 동안(셔터 180°) 4번 그려 평균, 멈춘 구간은 한 번
-    const fcv = document.createElement("canvas"); fcv.width = OW; fcv.height = OH; const fg = fcv.getContext("2d");
+    const fcv = document.createElement("canvas"); fcv.width = OW; fcv.height = OH; const fg = fcv.getContext("2d", { willReadFrequently: true });
     const MOVING = [[.1, 2.4], [T.gOut - .05, T.aiIn + 1.1], [T.zoom - .05, Math.max(T.zoomEnd + .9, T.chartsIn + 3 * T.chartGap + 1.3)]];
     const renderFrame = t => {
       const K = MOVING.some(([a, b]) => t >= a && t <= b) ? 4 : 1;
-      if (K === 1) { drawFrame(t); fg.globalAlpha = 1; fg.drawImage(cv, 0, 0); return; }
-      for (let j = 0; j < K; j++) { drawFrame(t + (j / (K - 1) - .5) * (.5 / FPS)); fg.globalAlpha = 1 / (j + 1); fg.drawImage(cv, 0, 0); }
-      fg.globalAlpha = 1;
+      fg.globalCompositeOperation = "copy"; fg.globalAlpha = 1;
+      if (K === 1) { drawFrame(t); fg.drawImage(cv, 0, 0); fg.globalCompositeOperation = "source-over"; return; }
+      fg.clearRect(0, 0, OW, OH); fg.globalCompositeOperation = "lighter"; fg.globalAlpha = 1 / K;   // 투명도까지 함께 평균 (곱해진 색끼리 더하기)
+      for (let j = 0; j < K; j++) { drawFrame(t + (j / (K - 1) - .5) * (.5 / FPS)); fg.drawImage(cv, 0, 0); }
+      fg.globalCompositeOperation = "source-over"; fg.globalAlpha = 1;
     };
     if (stillAt != null) {            // 한 장면만 그림으로
       try { renderFrame(stillAt); return await new Promise(ok => fcv.toBlob(ok, "image/png")); }
       finally { charts4.forEach(q => q.ch.destroy()); host.remove(); }
     }
-    const samples = []; let avcC = null, err = null;
-    const encoder = new VideoEncoder({
-      output: (chunk, meta) => { const d = new Uint8Array(chunk.byteLength); chunk.copyTo(d); samples.push({ data: d, key: chunk.type === "key" });
-        if (!avcC && meta && meta.decoderConfig && meta.decoderConfig.description) avcC = new Uint8Array(meta.decoderConfig.description.buffer ? meta.decoderConfig.description.buffer.slice(0) : meta.decoderConfig.description); },
-      error: e => { err = e; },
-    });
-    encoder.configure(cfg);
+    // 한 프레임을 색 영상 · 마스크 영상으로 나눈다
+    //  색: 투명도를 뺀 원래 색(반투명한 곳도 제 색 그대로). 완전히 투명한 곳은 둘레 2px까지 옆 색을 번져 채워
+    //      색 압축(4:2:0)이 가장자리에 검은 테를 만들지 않게 하고, 나머지는 검정
+    //  마스크: 흰색 = 보임, 검정 = 투명, 그 사이 회색 = 반투명 (프리미어 '트랙 매트 키'의 '매트 루마')
+    const PX = OW * OH, colBuf = new Uint8ClampedArray(PX * 4), matBuf = new Uint8ClampedArray(PX * 4), has = new Uint8Array(PX);
+    const split = () => {
+      const d = fg.getImageData(0, 0, OW, OH).data;
+      for (let i = 0, j = 0; i < PX; i++, j += 4) {
+        const a = d[j + 3]; matBuf[j] = matBuf[j + 1] = matBuf[j + 2] = a; matBuf[j + 3] = 255;
+        if (a) { colBuf[j] = d[j]; colBuf[j + 1] = d[j + 1]; colBuf[j + 2] = d[j + 2]; has[i] = 2; } else { colBuf[j] = colBuf[j + 1] = colBuf[j + 2] = 0; has[i] = 0; }
+        colBuf[j + 3] = 255;
+      }
+      const copy = (to, from) => { const a = to * 4, b = from * 4; colBuf[a] = colBuf[b]; colBuf[a + 1] = colBuf[b + 1]; colBuf[a + 2] = colBuf[b + 2]; has[to] = 1; };
+      for (let y = 0; y < OH; y++) {                       // 가로로 2px
+        const r = y * OW;
+        for (let x = 1; x < OW; x++) if (!has[r + x] && has[r + x - 1] === 2) { copy(r + x, r + x - 1); if (x + 1 < OW && !has[r + x + 1]) { copy(r + x + 1, r + x); x++; } }
+        for (let x = OW - 2; x >= 0; x--) if (!has[r + x] && has[r + x + 1] === 2) { copy(r + x, r + x + 1); if (x > 0 && !has[r + x - 1]) { copy(r + x - 1, r + x); x--; } }
+      }
+      for (let i = 0; i < PX; i++) if (has[i]) has[i] = 2;
+      for (let x = 0; x < OW; x++) {                       // 세로로 2px
+        for (let y = 1; y < OH; y++) { const i = y * OW + x; if (!has[i] && has[i - OW] === 2) { copy(i, i - OW); if (y + 1 < OH && !has[i + OW]) { copy(i + OW, i); y++; } } }
+        for (let y = OH - 2; y >= 0; y--) { const i = y * OW + x; if (!has[i] && has[i + OW] === 2) { copy(i, i + OW); if (y > 0 && !has[i - OW]) { copy(i - OW, i); y--; } } }
+      }
+    };
+    const mkEnc = () => {
+      const o = { samples: [], avcC: null, err: null };
+      o.enc = new VideoEncoder({
+        output: (chunk, meta) => { const d = new Uint8Array(chunk.byteLength); chunk.copyTo(d); o.samples.push({ data: d, key: chunk.type === "key" });
+          if (!o.avcC && meta && meta.decoderConfig && meta.decoderConfig.description) o.avcC = new Uint8Array(meta.decoderConfig.description.buffer ? meta.decoderConfig.description.buffer.slice(0) : meta.decoderConfig.description); },
+        error: e => { o.err = e; },
+      });
+      o.enc.configure(cfg); return o;
+    };
+    const E1 = mkEnc(), E2 = mkEnc();
     const N = Math.round(DUR * FPS);
     try {
       for (let i = 0; i < N; i++) {
-        if (err) throw err;
+        if (E1.err || E2.err) throw E1.err || E2.err;
         if (isCancelled && isCancelled()) throw new Error("취소");
-        renderFrame(i / FPS);
-        const fr = new VideoFrame(fcv, { timestamp: Math.round(i * 1e6 / FPS), duration: Math.round(1e6 / FPS) });
-        encoder.encode(fr, { keyFrame: i % (FPS * 2) === 0 }); fr.close();
-        while (encoder.encodeQueueSize > 6) await new Promise(r => setTimeout(r, 4));
+        renderFrame(i / FPS); split();
+        const ts = { timestamp: Math.round(i * 1e6 / FPS), duration: Math.round(1e6 / FPS) }, key = { keyFrame: i % (FPS * 2) === 0 };
+        const f1 = new VideoFrame(colBuf, Object.assign({ format: "RGBX", codedWidth: OW, codedHeight: OH }, ts)); E1.enc.encode(f1, key); f1.close();
+        const f2 = new VideoFrame(matBuf, Object.assign({ format: "RGBX", codedWidth: OW, codedHeight: OH }, ts)); E2.enc.encode(f2, key); f2.close();
+        while (E1.enc.encodeQueueSize > 4 || E2.enc.encodeQueueSize > 4) await new Promise(r => setTimeout(r, 4));
         if (i % 6 === 0) { onProgress && onProgress(i / N); await new Promise(r => setTimeout(r, 0)); }
       }
-      await encoder.flush();
+      await E1.enc.flush(); await E2.enc.flush();
     } finally {
-      try { encoder.close(); } catch (e) { /* 무시 */ }
+      for (const o of [E1, E2]) { try { o.enc.close(); } catch (e) { /* 무시 */ } }
       charts4.forEach(q => q.ch.destroy()); host.remove();
     }
-    if (err) throw err;
-    if (!avcC) throw new Error("영상 정보를 만들지 못했어요.");
+    if (E1.err || E2.err) throw E1.err || E2.err;
+    if (!E1.avcC || !E2.avcC) throw new Error("영상 정보를 만들지 못했어요.");
     onProgress && onProgress(1);
-    return mux(samples, avcC, OW, OH, FPS);
+    return { color: mux(E1.samples, E1.avcC, OW, OH, FPS), matte: mux(E2.samples, E2.avcC, OW, OH, FPS) };
   }
 
   /** 상세 화면의 영상 버튼 */
@@ -445,12 +467,15 @@ const videoMaker = (() => {
       <div class="acts"><button id="dC">취소</button></div>`, (b, c) => { close = c; b.querySelector("#dC").onclick = () => { cancelled = true; }; });
     $("#dlgBack").onclick = null;
     try {
-      const blob = await make(rec, p => { const t = Math.round(p * 100); const a = $("#vidP"), bb = $("#vidB"); if (a) a.textContent = `${t}% · 2560×1190 60프레임`; if (bb) bb.style.width = t + "%"; }, () => cancelled);
+      const out = await make(rec, p => { const t = Math.round(p * 100); const a = $("#vidP"), bb = $("#vidB"); if (a) a.textContent = `${t}% · 2560×1190 60프레임 · 색 + 마스크`; if (bb) bb.style.width = t + "%"; }, () => cancelled);
       close && close();
-      const name = ((rec.name || "").trim() || "elMotion").replace(/[\\/:*?"<>|]/g, "_") + "_elMotion.mp4";
-      const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = name;
-      document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 20000);
-      toast(`영상을 저장했어요 (${(blob.size / 1048576).toFixed(1)} MB).`, 4200);
+      const base = ((rec.name || "").trim() || "elMotion").replace(/[\\/:*?"<>|]/g, "_") + "_elMotion";
+      const save = (blob, name) => { const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = name;
+        document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 30000); };
+      save(out.color, base + "_색.mp4");
+      await new Promise(r => setTimeout(r, 900));                 // 두 번째 저장이 막히지 않게 잠깐 쉬었다가
+      save(out.matte, base + "_마스크.mp4");
+      toast(`영상 두 개를 저장했어요: 색 ${(out.color.size / 1048576).toFixed(1)} MB · 마스크 ${(out.matte.size / 1048576).toFixed(1)} MB`, 5200);
     } catch (e) {
       close && close();
       toast(cancelled ? "영상 만들기를 취소했어요." : (e && e.message) || "영상을 만들지 못했어요.", 4500);
