@@ -1,6 +1,6 @@
 /* elMotion · 가로 화면 소개 영상 (mp4) — 주인만 (2026-11-25 사용자 확정)
    2560×1190, 60프레임. 간단히의 게이지 3개 → 약 2.5초 뒤 자세히로 넘어가며 AI 평가 클로즈업 →
-   줌아웃되며 수치 카드 → 약 1.5초 뒤 스크롤되며 그래프 4개(가감속도·저크·상하·좌우)가 차례로 2×2.
+   줌아웃되며 수치 카드 9개와 그래프 4개(가감속도·저크·상하·좌우, 2×2)가 한 화면에 차례로 등장.
    화면을 캡처하지 않고 프레임마다 캔버스에 직접 그린 뒤 WebCodecs(H.264)로 압축하고 MP4로 묶는다. */
 "use strict";
 const OWNER_HASH = "9b4a0577bbb556fc2ac9bc0d0514d4b410d9ffcc010d69b6e63785c7973b23a2";
@@ -32,7 +32,7 @@ const owner = {
 
 const videoMaker = (() => {
   // 출력 2560×1190 (2026-11-25 사용자 확정). 그리기는 높이 1080 기준의 가상 좌표(폭 ≈ 2323)에서 하고 U배로 키워 담는다
-  const OW = 2560, OH = 1190, U = OH / 1080, W = OW / U, H = 1080, FPS = 60, DUR = 11.6;   // 그래프가 다 그려진 뒤 약 2.1초 머물고 끝
+  const OW = 2560, OH = 1190, U = OH / 1080, W = OW / U, H = 1080, FPS = 60, DUR = 9.6;   // 그래프가 다 그려진 뒤 약 2.1초 머물고 끝
   const ease = t => (t <= 0 ? 0 : t >= 1 ? 1 : t < .5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2);
   const out = t => (t <= 0 ? 0 : t >= 1 ? 1 : 1 - Math.pow(1 - t, 3));
   // 쫀득한 움직임 (2026-11-25 사용자 요청): 살짝 넘쳤다가 착 붙는 용수철
@@ -306,7 +306,9 @@ const videoMaker = (() => {
     const CG = 14, cw = (CW - CG * 8) / 9, ch = 214, cy0 = ai.y + ai.h + 34;
     // 그래프 4개 (속력 제외, 사용자 확정): 그래프 그리기는 앱의 Chart를 그대로 쓴다 (화면 밖 캔버스)
     const keys = ["acc", "jerk", "vibV", "vibL"].filter(k => k !== "vibL" || (m.vibL && m.vibL.n));
-    const GG = 26, gw = (CW - GG) / 2, gh = 400, gy0 = cy0 + ch + 56;
+    const GG = 26, gw = (CW - GG) / 2, gy0 = cy0 + ch + 30, gh = Math.floor((H - 36 - gy0 - GG) / 2);
+    // 2026-11-25: 스크롤 없이 카드 아래 한 화면에. 폭은 카드 줄에 맞춰 좌우로 길게, 높이만 남은 자리에 맞춘다
+    const GK = 1, gx0 = MX;
     const host = document.createElement("div"); host.style.cssText = `position:fixed;left:-99999px;top:0;width:${gw - 20}px;`; document.body.appendChild(host);
     const charts4 = keys.map(k => {
       const s = SERIES.find(x => x.key === k), c = document.createElement("canvas");
@@ -315,12 +317,12 @@ const videoMaker = (() => {
       const chObj = new Chart(c, { values: S[k], rate: rec.rate, color: s.color, half: s.half, dec: s.dec, unit: s.unit, animate: false, marks: true, spans: (k === "vibV" || k === "vibL") && m.cruise.length ? m.cruise : null, pauses: m.pauses });
       return { s, c, ch: chObj, comment };
     });
-    const scrollTo = gy0 - 60;
 
     // 시간표 (초)
-    // 2026-11-25: 게이지·AI 평가는 움직임이 멎은 뒤 1초만 보여 주고, 그래프 4개는 한꺼번에 등장
+    // 2026-11-25: 게이지·AI 평가는 움직임이 멎은 뒤 1초만 보여 주고, 그래프는 카드와 함께 한 화면에 차례로 등장
     //  게이지는 약 1.8초, AI 평가 상자는 등장 후 약 0.6초에 멎는다
-    const T = { gIn: 0, gOut: 2.8, aiIn: 3.1, zoom: 4.7, zoomEnd: 5.9, cardsIn: 5.3, scroll: 7.7, scrollEnd: 8.9, chartsIn: 8.3, chartGap: 0 };
+    const T = { gIn: 0, gOut: 2.8, aiIn: 3.1, zoom: 4.7, zoomEnd: 5.9, cardsIn: 5.3, cardGap: .07, chartGap: .1 };
+    T.chartsIn = T.cardsIn + cards.length * T.cardGap;                // 카드 9개에 이어 그래프 4개가 차례로 (한 물결)
     const drawFrame = t => {
       g.setTransform(U, 0, 0, U, 0, 0); g.globalAlpha = 1; g.filter = "none";
       background(g, P);
@@ -353,18 +355,16 @@ const videoMaker = (() => {
       // ── 장면 2~4: 자세히 (카메라: 클로즈업 → 줌아웃 → 스크롤)
       if (t >= T.gOut + .2) {
         const fade = out(seg(t, T.gOut + .2, T.aiIn + .5));
-        const z = glide(seg(t, T.zoom, T.zoomEnd + .3)), sc = glide(seg(t, T.scroll, T.scrollEnd + .3));
+        const z = glide(seg(t, T.zoom, T.zoomEnd + .3));
         // 줌아웃: 카드·그래프는 크게 다가와 있던 데서 제자리로 (가운데 기준 1.25 → 1)
-        const s = lerp(1.25, 1, z), fy = H / 2 + sc * scrollTo;
-        const gone = 1 - out(seg(t, T.scroll + .1, T.scroll + .75));       // 스크롤하며 위쪽(AI 평가·수치 카드)은 사라짐
+        const s = lerp(1.25, 1, z), fy = H / 2;
         g.save(); g.globalAlpha = fade; g.translate(W / 2, H / 2); g.scale(s, s); g.translate(-W / 2, -fy);
         // AI 평가: 클로즈업 상자 → 자세히 자리 (테두리는 하나로 옮겨 가고, 글은 큰 글 → 보통 글로 겹쳐 바뀜)
         {
           const aiK = out(seg(t, T.aiIn, T.aiIn + .45)), aiS = spring(seg(t, T.aiIn, T.aiIn + 1.0));
-          g.save(); g.setTransform(U, 0, 0, U, 0, 0); g.globalAlpha = fade * aiK * gone;
+          g.save(); g.setTransform(U, 0, 0, U, 0, 0); g.globalAlpha = fade * aiK;
           if (aiS < 1 && z === 0) { g.translate(W / 2, H / 2); g.scale(.82 + .18 * aiS, .82 + .18 * aiS); g.translate(-W / 2, -H / 2); }
-          const sy = -sc * scrollTo;                                   // 스크롤할 때는 함께 올라간다
-          const R = { x: lerp(hero.x, ai.x, z), y: lerp(hero.y, ai.y, z) + sy, w: lerp(hero.w, ai.w, z), h: lerp(hero.h, ai.h, z) };
+          const R = { x: lerp(hero.x, ai.x, z), y: lerp(hero.y, ai.y, z), w: lerp(hero.w, ai.w, z), h: lerp(hero.h, ai.h, z) };
           aiFrame(g, P2, R.x, R.y, R.w, R.h, t);
           g.save(); rr(g, R.x, R.y, R.w, R.h, 34); g.clip();
           const kz = lerp(KH, 1, z), zc = clamp(z, 0, 1);
@@ -374,15 +374,15 @@ const videoMaker = (() => {
           g.restore(); g.restore();
         }
         cards.forEach((c, i) => {
-          const t0 = T.cardsIn + i * .07, k = out(seg(t, t0, t0 + .3)) * gone, kS = spring(seg(t, t0, t0 + .85)); if (k <= 0) return;
+          const t0 = T.cardsIn + i * T.cardGap, k = out(seg(t, t0, t0 + .3)), kS = spring(seg(t, t0, t0 + .85)); if (k <= 0) return;
           const x = MX + i * (cw + CG) + cw / 2, y = cy0 + ch / 2;
           g.save(); g.globalAlpha *= k; g.translate(x, y + (1 - kS) * 60); g.scale(.85 + .15 * kS, .85 + .15 * kS); g.translate(-x, -y);
           card(g, P2, c, MX + i * (cw + CG), cy0, cw, ch); g.restore();
         });
         charts4.forEach((q, i) => {
           const t0 = T.chartsIn + i * T.chartGap, k = out(seg(t, t0, t0 + .3)), kS = spring(seg(t, t0, t0 + .9)); if (k <= 0) return;
-          const x = MX + (i % 2) * (gw + GG), y = gy0 + Math.floor(i / 2) * (gh + GG);
-          g.save(); g.globalAlpha *= k; g.translate(x + gw / 2, y + gh / 2 + (1 - kS) * 70); g.scale(.9 + .1 * kS, .9 + .1 * kS); g.translate(-x - gw / 2, -y - gh / 2);
+          const x = (i % 2) * (gw + GG), y = Math.floor(i / 2) * (gh + GG);
+          g.save(); g.translate(gx0, gy0); g.scale(GK, GK); g.globalAlpha *= k; g.translate(x + gw / 2, y + gh / 2 + (1 - kS) * 70); g.scale(.9 + .1 * kS, .9 + .1 * kS); g.translate(-x - gw / 2, -y - gh / 2);
           panel(g, P2, x, y, gw, gh, 30);
           g.textBaseline = "alphabetic"; g.textAlign = "left"; g.fillStyle = P2.ink; g.font = F(800, 26); g.fillText(q.s.title, x + 24, y + 48);
           const tw = g.measureText(q.s.title).width; g.fillStyle = P2.ink3; g.font = F(400, 19); g.fillText(q.s.unit, x + 24 + tw + 10, y + 48);
@@ -397,7 +397,7 @@ const videoMaker = (() => {
 
     // 모션 블러 (2026-11-25 사용자 요청): 움직이는 구간은 프레임 반 동안(셔터 180°) 4번 그려 평균, 멈춘 구간은 한 번
     const fcv = document.createElement("canvas"); fcv.width = OW; fcv.height = OH; const fg = fcv.getContext("2d");
-    const MOVING = [[.1, 2.4], [T.gOut - .05, T.aiIn + 1.1], [T.zoom - .05, T.zoomEnd + .9], [T.scroll - .05, T.chartsIn + 3 * T.chartGap + 1.3]];
+    const MOVING = [[.1, 2.4], [T.gOut - .05, T.aiIn + 1.1], [T.zoom - .05, Math.max(T.zoomEnd + .9, T.chartsIn + 3 * T.chartGap + 1.3)]];
     const renderFrame = t => {
       const K = MOVING.some(([a, b]) => t >= a && t <= b) ? 4 : 1;
       if (K === 1) { drawFrame(t); fg.globalAlpha = 1; fg.drawImage(cv, 0, 0); return; }
