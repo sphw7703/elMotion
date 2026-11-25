@@ -257,6 +257,9 @@ canvas.chart { display: block; width: 100%; height: 150px; touch-action: pan-y; 
   font: inherit; font-size: 15px; font-weight: 800; letter-spacing: -.2px; white-space: nowrap; color: #141C38; cursor: pointer; }
 :root[data-ui="dark"] .tog-text { color: #FFFFFF; }
 .tog-text:active { opacity: .6; }
+.tog-text svg { width: 18px; height: 18px; margin-right: 6px; flex: none; transition: transform .25s; }   /* 자세히 = 아래 화살표, 접을래요 = 위 화살표 */
+.tog-text.up svg { transform: rotate(180deg); }
+:root.wide .tog-text svg { width: 22px; height: 22px; }
 :root.wide .tog-text { font-size: 18px; height: 52px; }
 .toggle-wrap .pill-btn svg { transition: transform .3s; }
 .toggle-wrap .pill-btn.up svg { transform: rotate(180deg); }
