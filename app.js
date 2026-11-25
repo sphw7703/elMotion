@@ -4,7 +4,7 @@
 /* ───────── 상수 ───────── */
 const FS = Core.FS;
 /* 앱 버전 (2026-11-25 사용자 확정): 0.큰 기능 묶음.고친 횟수 — 웹 앱 확정 때 1.0.0, 안드로이드 앱 때 2.0.0 */
-const APP_VERSION = "0.11.3";
+const APP_VERSION = "0.11.4";
 const LEGEND = { acc: 1.5, lat: 30, latA: 20, spd: 600 };   // 물 높이 범례 (화면에 표시하지 않음). lat: 실시간 p-p, latA: 기록의 |A95|
 const CUT = Math.round(Core.P.CUT_SEC * FS);
 const CUT_MANUAL = Math.round(0.3 * FS);   // 수동 모드 종료 시 버려지는 마지막 0.3초
@@ -38,6 +38,7 @@ const ICON = {
   aiStar: '<svg class="ai-star" viewBox="4.5 2.5 15 15.1" fill="currentColor"><path d="M12 2.5c.6 4.6 2.9 6.9 7.5 7.5v.1c-4.6.6-6.9 2.9-7.5 7.5h-.1c-.6-4.6-2.9-6.9-7.5-7.5V10c4.6-.6 6.9-2.9 7.5-7.5z"/></svg>',
   play: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5.5v13a1 1 0 001.5.9l10.4-6.5a1 1 0 000-1.8L9.5 4.6A1 1 0 008 5.5z"/></svg>',
   pause: '<svg viewBox="0 0 24 24" fill="currentColor"><rect x="6.5" y="5" width="4" height="14" rx="1.4"/><rect x="13.5" y="5" width="4" height="14" rx="1.4"/></svg>',
+  reset: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 12a8 8 0 11-2.34-5.66"/><path d="M20 4v5h-5"/></svg>',
 };
 
 const prefs = {
@@ -577,6 +578,18 @@ const ctl = {
     try { navigator.vibrate && navigator.vibrate(30); } catch (e) { /* 무시 */ }
     home.render();
   },
+  /** 리셋 (2026-11-25): 엘리베이터가 서 있을 때 0.3초 이상 눌렀다 떼면, 지금까지 잰 것을 버리고 0.5초 보정 뒤 처음부터 다시 잰다 */
+  reset() {
+    if (this.state !== "measure" || this.phase !== "run") return;
+    this.vert = []; this.lat = []; this.segs = [0]; this.distOff = 0;
+    this.live = { acc: [], jerk: [], vibV: [], vibL: [], speed: [] };
+    this.o = null; this.startedAt = Date.now();
+    baro.start(performance.now()); baro.pause(0);              // 기압 기록도 처음부터 (보정이 끝나면 이어서)
+    this.phase = "calib"; this.rb = []; this.recalP = 0;     // 재개와 같은 0.5초 보정 → 새 분석기로 시작
+    try { navigator.vibrate && navigator.vibrate(30); } catch (e) { /* 무시 */ }
+    home.render();
+    toast("처음부터 다시 측정해요.");
+  },
   /** 측정 재개 버튼을 0.3초 이상 눌렀다 떼면: 0.5초 센서 보정 → 바로 재개 */
   recalibrate() {
     if (this.state !== "measure" || this.phase !== "pause") return;
@@ -714,7 +727,8 @@ const home = {
         const n = $("#pNote"); n.classList.remove("nudge"); void n.offsetWidth; n.classList.add("nudge"); });
     } else {
       const pause = measuring ? `<button class="pill-btn round hold" id="bPause" aria-label="일시정지 (0.3초 이상 길게 누르기)" title="0.3초 이상 길게 눌렀다 떼면 일시정지"><i class="fill"></i>${ICON.pause}</button>` : "";
-      box.innerHTML = `<div class="toggle-wrap act-row">${tog}${pause}${stop}${cancel}</div>`;
+      const reset = measuring ? `<button class="pill-btn round hold" id="bReset" aria-label="리셋 (정지 중 0.3초 이상 누르고 떼기)" title="엘리베이터가 서 있을 때 0.3초 이상 누르고 떼면 리셋"><i class="fill"></i>${ICON.reset}</button>` : "";
+      box.innerHTML = `<div class="toggle-wrap act-row">${tog}${reset}${pause}${stop}${cancel}</div>`;
     }
     if ($("#bTog")) $("#bTog").onclick = () => { this.detail = !this.detail; this.render(); };
     if ($("#bPause")) {
@@ -723,6 +737,9 @@ const home = {
       this.bindHold($("#bPause"), () => ctl.pause(at), () => toast("0.3초 이상 길게 눌렀다 떼 주세요."),
         () => { at = ctl.vert ? ctl.vert.length : null; });
     }
+    if ($("#bReset")) this.bindHold($("#bReset"),
+      () => { if (ctl.an && ctl.an.still) ctl.reset(); else toast("엘리베이터가 정지하면 리셋할 수 있어요."); },   // 손을 뗄 때 서 있어야
+      () => toast("0.3초 이상 누르고 떼면 리셋돼요."));
     if ($("#bStop")) $("#bStop").onclick = () => ctl.stop("manual");
     if ($("#bCancel")) $("#bCancel").onclick = () => { ctl.state = "idle"; ctl.progress = 0; ctl.stopDemo(); home.render(); };
   },

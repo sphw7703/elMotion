@@ -460,6 +460,7 @@ body.selecting #recList { padding-bottom: 150px; }
 .act-row { margin: 0; gap: 8px; display: flex; justify-content: center; }
 #homeActions { position: relative; }
 .act-row .pill-btn { white-space: nowrap; }
+@media (max-width: 380px) { .act-row { gap: 6px; } .act-row .pill-btn:not(.round) { padding: 0 14px; } }   /* 측정 중 버튼 4개(자세히·리셋·일시정지·정지)가 좁은 폰에도 한 줄에 */
 .pill-btn.round { width: 46px; padding: 0; flex: none; }
 .pill-btn.round svg { width: 18px; height: 18px; opacity: 1; }
 .pill-btn.hold:not(.round) { min-width: 150px; }
