@@ -4,7 +4,7 @@
 /* ───────── 상수 ───────── */
 const FS = Core.FS;
 /* 앱 버전 (2026-11-25 사용자 확정): 0.큰 기능 묶음.고친 횟수 — 웹 앱 확정 때 1.0.0, 안드로이드 앱 때 2.0.0 */
-const APP_VERSION = "0.11.4";
+const APP_VERSION = "0.11.5";
 const LEGEND = { acc: 1.5, lat: 30, latA: 20, spd: 600 };   // 물 높이 범례 (화면에 표시하지 않음). lat: 실시간 p-p, latA: 기록의 |A95|
 const CUT = Math.round(Core.P.CUT_SEC * FS);
 const CUT_MANUAL = Math.round(0.3 * FS);   // 수동 모드 종료 시 버려지는 마지막 0.3초
@@ -714,7 +714,7 @@ const home = {
     const measuring = ctl.state === "measure", ph = measuring ? ctl.phase : "";
     const k = `${measuring}|${this.detail}|${ctl.mode}|${ph}`;
     const box = $("#homeActions"); if (box.dataset.k === k) return; box.dataset.k = k;
-    const tog = `<button class="pill-btn ${this.detail ? "up" : ""}" id="bTog">${ICON.chev}${this.detail ? "접을래요" : "자세히 볼래요"}</button>`;
+    const tog = `<button class="tog-text" id="bTog">${this.detail ? "접을래요" : "자세히 볼래요"}</button>`;   // 글자만 (2026-11-25)
     const stop = measuring ? `<button class="pill-btn danger" id="bStop">${ICON.stop}${ctl.mode === "auto" ? "즉시 정지" : "측정 종료"}</button>` : "";
     const cancel = !measuring && ctl.state === "wait" ? `<button class="pill-btn" id="bCancel">취소</button>` : "";
     if (measuring && ph !== "run") {
@@ -998,7 +998,7 @@ const detail = {
         <button class="round-btn pop del" id="dDel" aria-label="기록 삭제">${ICON.del}</button></div>
       <div class="ai-box glass fade-in"><span class="ai-glow" aria-hidden="true"><i></i></span><span class="ai-chip">${ICON.aiStar}<span class="ai-t">AI 평가</span></span><p>${esc(ev.overall)}</p></div>
       <div id="dBody"></div>
-      <div class="toggle-wrap"><button class="pill-btn ${this.detail ? "up" : ""}" id="dTog">${ICON.chev}${this.detail ? "접을래요" : "자세히 볼래요"}</button></div>`;
+      <div class="toggle-wrap"><button class="tog-text" id="dTog">${this.detail ? "접을래요" : "자세히 볼래요"}</button></div>`;
     this.renderHead();
     const ai = box.querySelector(".ai-box"); if (ai) rainbowColors(ai);
     $("#dBack").onclick = () => nav.back();
@@ -1171,6 +1171,24 @@ const help = {
 };
 
 /* ───────── 가로 스와이프 공통 ───────── */
+/** 세로로 쓸어 넘기기 (2026-11-25): 아래로 = 자세히, 자세히에서 위로 = 간단히
+ *  내용이 스크롤되는 곳이라, 아래로는 맨 위에 있을 때만 · 위로는 맨 아래에 있을 때만 받는다 (스크롤과 겹치지 않게).
+ *  터치 이벤트로 받는다: 화면이 스크롤되기 시작해도 끝까지 따라가려고 */
+function vswipe(el, onDown, onUp, canStart = () => true) {
+  let sx = 0, sy = 0, t0 = 0, on = false, atTop = false, atBottom = false;
+  el.addEventListener("touchstart", e => {
+    if (e.touches.length !== 1 || !canStart(e)) { on = false; return; }
+    const t = e.touches[0]; sx = t.clientX; sy = t.clientY; t0 = performance.now(); on = true;
+    atTop = el.scrollTop <= 2; atBottom = el.scrollTop + el.clientHeight >= el.scrollHeight - 2;
+  }, { passive: true });
+  el.addEventListener("touchend", e => {
+    if (!on) return; on = false;
+    const t = e.changedTouches[0], dx = t.clientX - sx, dy = t.clientY - sy, dt = performance.now() - t0;
+    if (dt > 700 || Math.abs(dy) < 70 || Math.abs(dy) < Math.abs(dx) * 1.5) return;
+    if (dy > 0 && atTop) onDown(); else if (dy < 0 && atBottom) onUp();
+  }, { passive: true });
+  el.addEventListener("touchcancel", () => { on = false; }, { passive: true });
+}
 function swipe(el, onCommit, onMove, onCancel, canStart = () => true) {
   let sx = 0, sy = 0, dx = 0, active = false, dragging = false, id = null, t0 = 0;
   el.addEventListener("pointerdown", e => {
@@ -1217,6 +1235,12 @@ const nav = {
     $("#navHome").onclick = () => this.go(1);
     $("#navSettings").onclick = () => this.go(2);
     $("#btnHelp").onclick = () => help.open();
+    // 홈(측정): 아래로 쓸면 자세히, 자세히에서 위로 쓸면 간단히
+    const okHome = e => this.page === 1 && !this.overlay && !e.target.closest("input, .seg, .switch, .hold");
+    vswipe($("#pHome"), () => { if (!home.detail) { home.detail = true; home.render(); } }, () => { if (home.detail) { home.detail = false; home.render(); } }, okHome);
+    // 기록 보기: 같은 방식 (자세히는 뒤로 가기 기록과 함께)
+    vswipe($("#detailIn"), () => { if (detail.rec && !detail.detail) { detail.setDetail(true); nav.push("recordfull"); } },
+      () => { if (detail.rec && detail.detail) nav.back(); }, e => !e.target.closest("input, button"));
     if (location.hash) history.replaceState(null, "", location.pathname + location.search);   // 항상 홈에서 시작
     window.addEventListener("hashchange", () => this.onHash());
     window.addEventListener("resize", () => this.place());

@@ -7,7 +7,7 @@
    - 지우기: 어느 기기에서 지우든 모든 기기에서 지운다. 드라이브에는 30일 동안 남겨 '지운 기록'에서 되살릴 수 있다.
    - 고친 기록(이름 바꾸기 등): 나중에 고친 쪽이 이긴다.
    - 신호가 없을 때(엘리베이터 안)는 그대로 쓰고, 신호가 돌아오면 맞춘다. */
-const GSYNC_CLIENT_ID = "";   // 구글 클라우드의 OAuth 클라이언트 ID (웹 애플리케이션, 승인된 출처 https://sphw7703.github.io)
+const GSYNC_CLIENT_ID = "644111210876-nurq623vl9hj7dfoofniqsojbcsl1tk5.apps.googleusercontent.com";   // 구글 클라우드의 OAuth 클라이언트 ID (웹 애플리케이션, 승인된 출처 https://sphw7703.github.io)
 
 const gsync = {
   clientId: GSYNC_CLIENT_ID,
