@@ -4,7 +4,7 @@
 /* ───────── 상수 ───────── */
 const FS = Core.FS;
 /* 앱 버전 (2026-11-25 사용자 확정): 0.큰 기능 묶음.고친 횟수 — 웹 앱 확정 때 1.0.0, 안드로이드 앱 때 2.0.0 */
-const APP_VERSION = "0.10.11";
+const APP_VERSION = "0.10.12";
 const LEGEND = { acc: 1.5, lat: 30, latA: 20, spd: 600 };   // 물 높이 범례 (화면에 표시하지 않음). lat: 실시간 p-p, latA: 기록의 |A95|
 const CUT = Math.round(Core.P.CUT_SEC * FS);
 const CUT_MANUAL = Math.round(0.3 * FS);   // 수동 모드 종료 시 버려지는 마지막 0.3초
@@ -1311,6 +1311,7 @@ const installer = {
   get installed() { return matchMedia("(display-mode: standalone)").matches || navigator.standalone === true; },
   get ios() { return /iPhone|iPad|iPod/.test(navigator.userAgent); },
   init() {
+    this.orient();
     if (!inPreview() && "serviceWorker" in navigator && window.isSecureContext) this.sw();
     window.addEventListener("beforeinstallprompt", e => { e.preventDefault(); this.evt = e; this.render(); });
     window.addEventListener("appinstalled", () => { this.evt = null; this.render(); toast("elMotion을 설치했어요. 홈 화면에서 열 수 있어요."); });
@@ -1318,6 +1319,13 @@ const installer = {
     this.render();
   },
   render() { $("#btnInstall").hidden = this.installed || inPreview(); },
+  /** 설치한 앱의 화면 방향 (2026-11-25): 앱 설정은 '자유'로 두고, 폰처럼 짧은 변이 600px 미만인 기기만 세로로 묶는다.
+   *  태블릿은 기기를 돌리면 가로 화면 배치로 바뀐다. 묶기를 못 하는 브라우저면 그냥 자유. */
+  orient() {
+    if (!this.installed || !screen.orientation || !screen.orientation.lock) return;
+    const lock = () => { if (Math.min(screen.width, screen.height) < 600) screen.orientation.lock("portrait").catch(() => {}); };
+    lock(); document.addEventListener("visibilitychange", () => { if (!document.hidden) lock(); });
+  },
   /** 새 버전 자동 적용 (2026-11-25): 앱이 켜진 채 백그라운드에 있다 돌아와도 새 파일로 바뀌게.
    *  측정·영상 만들기·대화상자 중에는 기다렸다가, 한가해지면 한 번 새로 고친다. */
   sw() {
