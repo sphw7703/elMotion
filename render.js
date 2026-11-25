@@ -87,7 +87,7 @@ const videoMaker = (() => {
   function loadImg(src) { return new Promise(ok => { const im = new Image(); im.onload = () => ok(im); im.onerror = () => ok(null); im.src = src; }); }
 
   function background(g, P) {
-    if (P.key) { if (P.keyColor) { g.fillStyle = P.keyColor; g.fillRect(0, 0, W, H); } else g.clearRect(0, 0, W, H); return; }
+    if (P.key) { g.clearRect(0, 0, W, H); return; }
     if (P.dark) {
       const lg = g.createLinearGradient(0, 0, 0, H); lg.addColorStop(0, "#0E1325"); lg.addColorStop(1, "#090C16"); g.fillStyle = lg; g.fillRect(0, 0, W, H);
       const glow = (cx, cy, rx, ry, col) => { g.save(); g.translate(cx, cy); g.scale(1, ry / rx); const r = g.createRadialGradient(0, 0, 0, 0, 0, rx); r.addColorStop(0, col); r.addColorStop(.7, "rgba(0,0,0,0)"); g.fillStyle = r; g.fillRect(-rx, -rx, 2 * rx, 2 * rx); g.restore(); };
@@ -107,8 +107,6 @@ const videoMaker = (() => {
   /** 유리 구슬 게이지 */
   function sphere(g, P, cx, cy, d, kind, level, main, sub, unit, t) {
     const x = cx - d / 2, y = cy - d / 2, a0 = g.globalAlpha;   // 바깥에서 준 투명도(등장·퇴장)를 모든 층이 따르게 (2026-11-25)
-    // 마젠타 배경 영상: 구슬 뒤에 앱 배경색 원을 깔아 반투명한 유리 광택 사이로 마젠타가 비치지 않게 (앱에서 보이는 모습과 같다)
-    if (P.keyBack) { g.save(); g.beginPath(); g.arc(cx, cy, d * .485, 0, Math.PI * 2); g.fillStyle = P.dark ? "#0F131B" : "#E9EDF5"; g.fill(); g.restore(); }
     if (P.glass) g.drawImage(P.glass, x, y, d, d);
     g.save(); g.beginPath(); g.ellipse(cx, cy - d * .002, d * .4775, d * .46, 0, 0, Math.PI * 2); g.clip();
     const top = cy + d * .46 - Math.max(level > 0 ? .045 : 0, level) * d * .92;
@@ -238,9 +236,8 @@ const videoMaker = (() => {
   }
 
   /** 기록 하나 → 영상 */
-  /** mode: "matte" = 색 + 흑백 마스크 두 개 · "key" = 마젠타(#FF00FF) 배경 한 개 */
-  async function make(rec, onProgress, isCancelled, stillAt, mode) {
-    mode = mode || "matte";
+  /** 영상 = 색 영상 + 흑백 마스크 영상 두 개 (2026-11-25 사용자 확정: 프리미어 '트랙 매트 키' · '매트 루마') */
+  async function make(rec, onProgress, isCancelled, stillAt) {
     if (stillAt == null && typeof VideoEncoder === "undefined" || typeof VideoFrame === "undefined") throw new Error("이 브라우저는 영상 만들기를 지원하지 않아요. 크롬 최신 버전에서 해 주세요.");
     // 2560×1190은 H.264 레벨 5.1 이상이 필요하다
     const cfgs = ["avc1.640033", "avc1.640034", "avc1.4D4033", "avc1.420033", "avc1.640032"].map(codec => ({ codec, width: OW, height: OH, bitrate: 22e6, framerate: FPS, avc: { format: "avc" }, latencyMode: "quality" }));
@@ -251,8 +248,7 @@ const videoMaker = (() => {
     const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
     const pal = (dark ? RAINBOW.dark : RAINBOW.light).slice(); for (let i = pal.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [pal[i], pal[j]] = [pal[j], pal[i]]; }
     try { await document.fonts.load(F(800, 40)); await document.fonts.load(F(200, 40)); await document.fonts.load(F(400, 20)); } catch (e) { /* 기본 글꼴 */ }
-    const KEYC = mode === "key" ? "#FF00FF" : null;   // 마젠타: 앱 색에 거의 없는 색
-    const P = { key: true, keyBack: !!KEYC, dark, ink: "#131A2B", ink2: "#48526A", ink3: "#8691A7", colors: pal, glass: await loadImg(dark ? "assets/glass-dark.webp" : "assets/glass.webp") };
+    const P = { key: true, dark, ink: "#131A2B", ink2: "#48526A", ink3: "#8691A7", colors: pal, glass: await loadImg(dark ? "assets/glass-dark.webp" : "assets/glass.webp") };
     // 게이지가 사라진 뒤의 장면은 모두 다크 모드 디자인 (2026-11-25 사용자 확정). 무지개 순서는 같게
     const order = pal.map(c => (dark ? RAINBOW.dark : RAINBOW.light).indexOf(c));
     const P2 = { key: true, dark: true, ink: "#EEF2FF", ink2: "#A6B0CC", ink3: "#6B7594", colors: order.map(i => RAINBOW.dark[i]), glass: P.glass };
@@ -432,22 +428,6 @@ const videoMaker = (() => {
         for (let y = OH - 2; y >= 0; y--) { const i = y * OW + x; if (!has[i] && has[i + OW] === 2) { copy(i, i + OW); if (y > 0 && !has[i - OW]) { copy(i - OW, i); y--; } } }
       }
     };
-    // 마젠타 배경 (2026-11-25): 투명하게 그린 화면을 마젠타 위에 얹되, 거의 불투명한 곳(유리 구슬 76~92%, 판)은 뒤에 앱 배경색을 깔아
-    // 키잉 때 구슬 속에 마젠타가 비쳐 색이 틀어지거나 반쯤 지워지지 않게 한다. 가장자리·빛 번짐처럼 옅은 곳만 마젠타와 섞인다.
-    //  뒤에 까는 색: 게이지 장면 = 라이트 배경 #E9EDF5, 자세히 장면 = 다크 배경 #0F131B (장면이 바뀌는 동안 섞임)
-    const keyMix = t => {
-      const d = fg.getImageData(0, 0, OW, OH).data, lt = 1 - out(seg(t, T.gOut + .2, T.aiIn + .5));
-      const BR = 0x0F + (0xE9 - 0x0F) * lt, BG = 0x13 + (0xED - 0x13) * lt, BB = 0x1B + (0xF5 - 0x1B) * lt;
-      for (let j = 0; j < PX * 4; j += 4) {
-        const A = d[j + 3];
-        if (A === 0) { colBuf[j] = 255; colBuf[j + 1] = 0; colBuf[j + 2] = 255; colBuf[j + 3] = 255; continue; }
-        const a = A / 255, u = Math.min(1, Math.max(0, (a - .35) / .4)), w = u * u * (3 - 2 * u), ia = 1 - a;
-        colBuf[j] = d[j] * a + (255 * (1 - w) + BR * w) * ia;
-        colBuf[j + 1] = d[j + 1] * a + (BG * w) * ia;
-        colBuf[j + 2] = d[j + 2] * a + (255 * (1 - w) + BB * w) * ia;
-        colBuf[j + 3] = 255;
-      }
-    };
     const mkEnc = () => {
       const o = { samples: [], avcC: null, err: null };
       o.enc = new VideoEncoder({
@@ -457,68 +437,49 @@ const videoMaker = (() => {
       });
       o.enc.configure(cfg); return o;
     };
-    const E1 = mkEnc(), E2 = KEYC ? null : mkEnc();
+    const E1 = mkEnc(), E2 = mkEnc();
     const N = Math.round(DUR * FPS);
     try {
       for (let i = 0; i < N; i++) {
-        if (E1.err || (E2 && E2.err)) throw E1.err || E2.err;
+        if (E1.err || E2.err) throw E1.err || E2.err;
         if (isCancelled && isCancelled()) throw new Error("취소");
         renderFrame(i / FPS);
         const ts = { timestamp: Math.round(i * 1e6 / FPS), duration: Math.round(1e6 / FPS) }, key = { keyFrame: i % (FPS * 2) === 0 };
-        if (KEYC) { keyMix(i / FPS); const f = new VideoFrame(colBuf, Object.assign({ format: "RGBX", codedWidth: OW, codedHeight: OH }, ts)); E1.enc.encode(f, key); f.close(); }   // 마젠타 배경: 한 개
-        else {
-          split();
-          const f1 = new VideoFrame(colBuf, Object.assign({ format: "RGBX", codedWidth: OW, codedHeight: OH }, ts)); E1.enc.encode(f1, key); f1.close();
-          const f2 = new VideoFrame(matBuf, Object.assign({ format: "RGBX", codedWidth: OW, codedHeight: OH }, ts)); E2.enc.encode(f2, key); f2.close();
-        }
-        while (E1.enc.encodeQueueSize > 4 || (E2 && E2.enc.encodeQueueSize > 4)) await new Promise(r => setTimeout(r, 4));
+        split();
+        const f1 = new VideoFrame(colBuf, Object.assign({ format: "RGBX", codedWidth: OW, codedHeight: OH }, ts)); E1.enc.encode(f1, key); f1.close();
+        const f2 = new VideoFrame(matBuf, Object.assign({ format: "RGBX", codedWidth: OW, codedHeight: OH }, ts)); E2.enc.encode(f2, key); f2.close();
+        while (E1.enc.encodeQueueSize > 4 || E2.enc.encodeQueueSize > 4) await new Promise(r => setTimeout(r, 4));
         if (i % 6 === 0) { onProgress && onProgress(i / N); await new Promise(r => setTimeout(r, 0)); }
       }
-      await E1.enc.flush(); if (E2) await E2.enc.flush();
+      await E1.enc.flush(); await E2.enc.flush();
     } finally {
-      for (const o of [E1, E2]) { if (o) try { o.enc.close(); } catch (e) { /* 무시 */ } }
+      for (const o of [E1, E2]) { try { o.enc.close(); } catch (e) { /* 무시 */ } }
       charts4.forEach(q => q.ch.destroy()); host.remove();
     }
-    if (E1.err || (E2 && E2.err)) throw E1.err || E2.err;
-    if (!E1.avcC || (E2 && !E2.avcC)) throw new Error("영상 정보를 만들지 못했어요.");
+    if (E1.err || E2.err) throw E1.err || E2.err;
+    if (!E1.avcC || !E2.avcC) throw new Error("영상 정보를 만들지 못했어요.");
     onProgress && onProgress(1);
-    if (KEYC) return { key: mux(E1.samples, E1.avcC, OW, OH, FPS) };
     return { color: mux(E1.samples, E1.avcC, OW, OH, FPS), matte: mux(E2.samples, E2.avcC, OW, OH, FPS) };
   }
 
-  /** 상세 화면의 영상 버튼: 합성 방식을 고른 뒤 만든다 (2026-11-25) */
-  function run(rec) {
-    dialog(`<h3>영상 합성 방식</h3><p>프리미어 프로에서 배경을 빼는 방법을 골라 주세요.</p>
-      <div class="vid-modes">
-        <button class="vid-mode" data-mode="matte"><b>색 + 마스크 (2개)</b><span>트랙 매트 키 · 매트 루마. 색 손상 없음</span></button>
-        <button class="vid-mode" data-mode="key"><b>마젠타 배경 (1개)</b><span>울트라 키 · #FF00FF</span></button>
-      </div>
-      <div class="acts"><button id="vmC">취소</button></div>`, (b, close) => {
-      b.querySelector("#vmC").onclick = close;
-      b.querySelectorAll("[data-mode]").forEach(x => x.onclick = () => { close(); setTimeout(() => build(rec, x.dataset.mode), 250); });
-    });
-  }
-  async function build(rec, mode) {
+  /** 상세 화면의 영상 버튼 */
+  async function run(rec) {
     window.__vidBusy = true;
     let cancelled = false, close = null;
-    const label = mode === "key" ? "마젠타 배경" : "색 + 마스크";
     dialog(`<h3>영상 만드는 중</h3><p id="vidP">0%</p><div class="vid-bar"><i id="vidB"></i></div>
       <div class="acts"><button id="dC">취소</button></div>`, (b, c) => { close = c; b.querySelector("#dC").onclick = () => { cancelled = true; }; });
     $("#dlgBack").onclick = null;
     try {
-      const out = await make(rec, p => { const t = Math.round(p * 100); const a = $("#vidP"), bb = $("#vidB"); if (a) a.textContent = `${t}% · 2560×1190 60프레임 · ${label}`; if (bb) bb.style.width = t + "%"; }, () => cancelled, null, mode);
+      const out = await make(rec, p => { const t = Math.round(p * 100); const a = $("#vidP"), bb = $("#vidB"); if (a) a.textContent = `${t}% · 2560×1190 60프레임 · 색 + 마스크`; if (bb) bb.style.width = t + "%"; }, () => cancelled);
       close && close();
       const base = ((rec.name || "").trim() || "elMotion").replace(/[\\/:*?"<>|]/g, "_") + "_elMotion";
       const save = (blob, name) => { const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = name;
         document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 30000); };
       const mb = bl => (bl.size / 1048576).toFixed(1);
-      if (out.key) { save(out.key, base + "_마젠타.mp4"); toast(`영상을 저장했어요 (${mb(out.key)} MB).`, 4200); }
-      else {
-        save(out.color, base + "_색.mp4");
-        await new Promise(r => setTimeout(r, 900));                 // 두 번째 저장이 막히지 않게 잠깐 쉬었다가
-        save(out.matte, base + "_마스크.mp4");
-        toast(`영상 두 개를 저장했어요: 색 ${mb(out.color)} MB · 마스크 ${mb(out.matte)} MB`, 5200);
-      }
+      save(out.color, base + "_색.mp4");
+      await new Promise(r => setTimeout(r, 900));                   // 두 번째 저장이 막히지 않게 잠깐 쉬었다가
+      save(out.matte, base + "_마스크.mp4");
+      toast(`영상 두 개를 저장했어요: 색 ${mb(out.color)} MB · 마스크 ${mb(out.matte)} MB`, 5200);
     } catch (e) {
       close && close();
       toast(cancelled ? "영상 만들기를 취소했어요." : (e && e.message) || "영상을 만들지 못했어요.", 4500);
