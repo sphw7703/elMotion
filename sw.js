@@ -1,5 +1,5 @@
 /* elMotion 서비스 워커: 온라인이면 항상 최신 파일, 신호가 끊기면(엘리베이터 안 등) 저장해 둔 파일로 실행 */
-const CACHE = "elmotion-v59";
+const CACHE = "elmotion-v60";
 const FILES = ["./", "index.html", "app.js", "core.js", "render.js", "sync.js", "manifest.webmanifest",
   "assets/glass.webp", "assets/glass-dark.webp", "assets/fonts/NanumSquareNeo-Variable.woff",
   "assets/ic-measure.png", "assets/ic-records.png", "assets/ic-settings.png",
@@ -17,7 +17,6 @@ self.addEventListener("activate", e => {
 self.addEventListener("fetch", e => {
   const req = e.request;
   if (req.method !== "GET" || new URL(req.url).origin !== location.origin) return;
-  if (new URL(req.url).pathname.endsWith("/baro")) return;     // 기압 중계기 실시간 흐름은 건드리지 않음
   e.respondWith(fetch(req, { cache: "no-cache" }).then(res => {   // 브라우저 HTTP 캐시(깃허브 10분)를 건너뛰고 서버에 확인
     if (res.ok) { const copy = res.clone(); caches.open(CACHE).then(c => c.put(req, copy)); }
     return res;

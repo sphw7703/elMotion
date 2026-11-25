@@ -1002,15 +1002,12 @@
     let hasE = false;
     // elMotion에서 내보낸 파일의 일시정지 구간 번호 (segment 열)
     const segCol = (rows[2] || []).findIndex(c => String(c).trim() === "segment");
-    const prCol = (rows[2] || []).findIndex(c => String(c).trim() === "pressure_hpa");
-    const pr = [];
     for (let r = 3; r < rows.length; r++) {
       const row = rows[r];
       const tv = num(row[0]), bv = num(row[1]);
       if (Number.isNaN(tv) || Number.isNaN(bv)) continue;
       const ev = num(row[4]);
       t.push(tv); b.push(bv); e.push(ev); if (segCol >= 0) sg.push(num(row[segCol]));
-      if (prCol >= 0) { const pv = num(row[prCol]); if (!Number.isNaN(pv)) pr.push({ k: t.length - 1, p: pv }); }
       if (!Number.isNaN(ev)) hasE = true;
     }
     if (b.length < 10) throw new Error("A4·B4 아래에 숫자 데이터가 부족해요");
@@ -1050,8 +1047,7 @@
       for (let k = 1; k < sg.length; k++) if (sg[k] !== sg[k - 1] && !Number.isNaN(sg[k])) st.push(Math.round(ts[k] * FS));
       if (st.length > 1) segs = st;
     }
-    const baro = pr.length > 4 ? pr.map(({ k, p }) => ({ t: ts[k], p })) : null;
-    return { vert: vN.data, lat: lN ? lN.data : null, rate: FS, startedAt, segs, baro, info: { srcRate, vertUnit: vN.unit, latUnit: lN ? lN.unit : null } };
+    return { vert: vN.data, lat: lN ? lN.data : null, rate: FS, startedAt, segs, info: { srcRate, vertUnit: vN.unit, latUnit: lN ? lN.unit : null } };
   }
 
   /** 상하 가속도만 있는 .txt (LiftTest 형식: 첫 줄 'Time  Acceleration', 그 아래 '초  m/s²' 두 열, 중력 제거됨).
@@ -1081,7 +1077,7 @@
       out[i] = a[j] + (a[j + 1] - a[j]) * Math.min(1, Math.max(0, (tt - x0) / (x1 - x0)));
     }
     const vN = normalizeColumn(Array.from(out), FS);
-    return { vert: vN.data, lat: null, rate: FS, startedAt: null, segs: null, baro: null, zOnly: true, info: { srcRate: 1 / dt, vertUnit: vN.unit, latUnit: null } };
+    return { vert: vN.data, lat: null, rate: FS, startedAt: null, segs: null, zOnly: true, info: { srcRate: 1 / dt, vertUnit: vN.unit, latUnit: null } };
   }
 
   function exportCsv(rec, A) {
@@ -1091,16 +1087,12 @@
     const lines = [
       `# name,"${(rec.name || "").replace(/"/g, '""')}"`,
       `# started_at,${when},sample_rate_hz,${rec.rate}`,
-      "time_s,vertical_accel_m_s2,accel_m_s2,jerk_m_s3,lateral_accel_m_s2,vertical_vib_gal,lateral_vib_gal,speed_m_min,distance_m,segment,pressure_hpa",
+      "time_s,vertical_accel_m_s2,accel_m_s2,jerk_m_s3,lateral_accel_m_s2,vertical_vib_gal,lateral_vib_gal,speed_m_min,distance_m,segment",
     ];
     const bd = segBounds(n, rec.segs);
-    // 기압: 측정한 시각 그대로, 그 시각에 가장 가까운 줄에 적는다 (나머지 줄은 빈칸)
-    const pr = new Map();
-    if (rec.baro) for (const b of rec.baro) { const i = Math.round(b.t * rec.rate); if (i >= 0 && i < n && !pr.has(i)) pr.set(i, b.p); }
     for (let k = 0; k < bd.length; k++) for (let i = bd[k][0]; i < bd[k][1]; i++) {
       lines.push([(i / rec.rate).toFixed(4), f(rec.vert[i]), f(S.acc[i]), f(S.jerk[i]),
-        rec.lat ? f(rec.lat[i]) : "", f(S.vibV[i], 2), rec.lat ? f(S.vibL[i], 2) : "", f(S.speed[i], 2), f(S.dist[i], 3), k + 1,
-        pr.has(i) ? pr.get(i).toFixed(4) : ""].join(","));
+        rec.lat ? f(rec.lat[i]) : "", f(S.vibV[i], 2), rec.lat ? f(S.vibL[i], 2) : "", f(S.speed[i], 2), f(S.dist[i], 3), k + 1].join(","));
     }
     return lines.join("\n") + "\n";
   }

@@ -4,7 +4,7 @@
 /* ───────── 상수 ───────── */
 const FS = Core.FS;
 /* 앱 버전 (2026-11-25 사용자 확정): 0.큰 기능 묶음.고친 횟수 — 웹 앱 확정 때 1.0.0, 안드로이드 앱 때 2.0.0 */
-const APP_VERSION = "0.11.10";
+const APP_VERSION = "0.11.11";
 const LEGEND = { acc: 1.5, lat: 30, latA: 20, spd: 600 };   // 물 높이 범례 (화면에 표시하지 않음). lat: 실시간 p-p, latA: 기록의 |A95|
 const CUT = Math.round(Core.P.CUT_SEC * FS);
 const CUT_MANUAL = Math.round(0.3 * FS);   // 수동 모드 종료 시 버려지는 마지막 0.3초
@@ -321,51 +321,8 @@ const SERIES = [
 
 /* ───────── 기록 저장소 (IndexedDB) ───────── */
 const cache = new Map();
-/* 기압계: 개발용 기준 측정 (2026-11-24 사용자 확정 — 계산에는 쓰지 않는다)
-   실측해 보니 기압 보정의 이득은 0.5% 남짓이고 승강로 공기 온도에 따라 비율이 ±2~4% 흔들려, 앱의 보정에서는 뺐다.
-   개발할 때 정답 비교용으로만: 안드로이드 Termux에서 tools/baro_bridge.py를 돌리고 http://localhost:8080 으로 열면
-   측정할 때 기압을 함께 기록해 CSV(pressure_hpa 열)로 내보낸다. github.io 등 일반 주소에서는 아무것도 하지 않는다. */
-const baro = {
-  bridgeOk: false, live: null, liveAt: 0, rec: false,
-  get supported() { return this.bridgeOk; },
-  get on() { return this.supported; },
-  get isDev() { return /^(localhost|127\.0\.0\.1)$/.test(location.hostname); },
-  connectBridge() {
-    if (!/^(localhost|127\.0\.0\.1)$/.test(location.hostname) || typeof EventSource !== "function") return;
-    // 화면이 보일 때만 연결한다 (측정 중이면 계속). 연결이 끊기면 중계기가 기압계를 끄고, 오래 끊기면 중계기도 꺼진다.
-    const open = () => {
-      if (this.es) return;
-      try {
-        const es = this.es = new EventSource("baro");
-        es.onmessage = e => {
-          const p = parseFloat(e.data); if (!(p > 300 && p < 1200)) return;
-          const first = !this.bridgeOk; this.bridgeOk = true; this.live = p;
-          if (this.rec && !this.paused) this.samples.push({ t: (performance.now() - this.t0) / 1000, p });
-          const now = performance.now();
-          if (first || now - this.liveAt > 1000) { this.liveAt = now; if (typeof settings !== "undefined") settings.renderBaro(); }
-        };
-        es.onerror = () => {
-          if (this.bridgeOk) { this.bridgeOk = false; this.live = null; if (typeof settings !== "undefined") settings.renderBaro(); }
-        };
-      } catch (e) { this.es = null; }
-    };
-    const close = () => { if (this.es) { this.es.close(); this.es = null; } };
-    document.addEventListener("visibilitychange", () => { if (document.hidden && !this.rec) close(); else if (!document.hidden) open(); });
-    window.addEventListener("pagehide", close);
-    open();
-  },
-  start(t0) {
-    this.samples = []; this.t0 = t0; this.paused = false; this.recSec = 0; this.rec = false;
-    // 중계기 주소(localhost)로 열었으면, 측정을 시작할 때 아직 연결 전이어도 연결되는 순간부터 기압을 함께 기록한다
-    if (this.es) this.rec = true;
-  },
-  stop() { this.rec = false; return this.samples && this.samples.length > 4 ? this.samples : null; },
-  // 일시정지: 기록된 시간(recSec)까지만 남기고, 재개하면 그 시각부터 이어서 센다
-  pause(recSec) { this.paused = true; if (this.samples) this.samples = this.samples.filter(b => b.t <= recSec); this.recSec = recSec; },
-  resume() { this.paused = false; this.t0 = performance.now() - (this.recSec || 0) * 1000; },
-};
 function analysisOf(rec) {
-  // 가속도 센서만으로 계산 (출발 직전 영점 + 전체 적분 + 정지 시점 되짚기). 기압은 기록만 하고 계산에는 쓰지 않는다.
+  // 가속도 센서만으로 계산 (출발 직전 영점 + 전체 적분 + 정지 시점 되짚기)
   const k = rec.id + ":" + rec.vert.length + ":" + (rec.segs ? rec.segs.join(".") : "");
   if (!cache.has(k)) {
     const A = Core.analyze(rec.vert, rec.lat, rec.rate, rec.segs);
@@ -548,7 +505,6 @@ const ctl = {
     this.vert = []; this.lat = [];
     this.live = { acc: [], jerk: [], vibV: [], vibL: [], speed: [] };
     this.o = null; this.startedAt = Date.now();
-    baro.start(performance.now());
     this.lockScreen();
     home.render();
   },
@@ -573,7 +529,6 @@ const ctl = {
     for (const k in this.live) this.live[k].splice(Math.max(0, this.live[k].length - drop), drop);
     if (n === s0 && this.segs.length > 1) this.segs.pop();     // 재개하자마자 멈췄으면 빈 구간은 없앤다
     this.phase = "pause";
-    baro.pause(n / FS);
     this.unlockScreen();
     try { navigator.vibrate && navigator.vibrate(30); } catch (e) { /* 무시 */ }
     home.render();
@@ -584,7 +539,6 @@ const ctl = {
     this.vert = []; this.lat = []; this.segs = [0]; this.distOff = 0;
     this.live = { acc: [], jerk: [], vibV: [], vibL: [], speed: [] };
     this.o = null; this.startedAt = Date.now();
-    baro.start(performance.now()); baro.pause(0);              // 기압 기록도 처음부터 (보정이 끝나면 이어서)
     this.phase = "calib"; this.rb = []; this.recalP = 0;     // 재개와 같은 0.5초 보정 → 새 분석기로 시작
     try { navigator.vibrate && navigator.vibrate(30); } catch (e) { /* 무시 */ }
     home.render();
@@ -612,7 +566,6 @@ const ctl = {
     this.an = new Core.RideAnalyzer(FS); this.o = null;
     if (this.vert.length > this.segs[this.segs.length - 1]) this.segs.push(this.vert.length);
     this.phase = "run"; this.rb = null;
-    baro.resume();
     home.render();
   },
   async stop(reason) {
@@ -620,7 +573,6 @@ const ctl = {
     const wasRun = this.phase === "run";
     this.state = "idle"; this.phase = "run"; this.needDisturb = true; this.progress = 0;
     this.unlockScreen();
-    const baroSamples = baro.stop();
     const demo = !!this.demo; this.stopDemo();
     // 비정상 흔들림: 감지 0.2초 전까지 / 수동 모드에서 버튼으로 끝낼 때: 버튼을 누르며 생긴 흔들림을 빼려고 0.3초 전까지
     // 일시정지 중에 끝내면 이미 잘라 두었으니 더 자르지 않는다
@@ -631,8 +583,7 @@ const ctl = {
     if (n < FS) { toast("측정 시간이 너무 짧아 저장하지 않았어요."); return; }
     if (reason === "abnormal") { toast("비정상적인 흔들림이 감지되어 측정을 종료했어요.", 4200); try { navigator.vibrate && navigator.vibrate(60); } catch (e) { /* 무시 */ } }
     const rec = { id: `ride_${this.startedAt}_${Math.random().toString(36).slice(2, 6)}`, name: demo ? "데모 측정" : "", startedAt: this.startedAt, rate: FS, demo,
-      vert: Float32Array.from(this.vert.slice(0, n)), lat: Float32Array.from(this.lat.slice(0, n)), updatedAt: Date.now(),
-      baro: baroSamples ? baroSamples.filter(b => b.t <= n / FS) : null };
+      vert: Float32Array.from(this.vert.slice(0, n)), lat: Float32Array.from(this.lat.slice(0, n)), updatedAt: Date.now() };
     if (segs.length > 1) rec.segs = segs;
     try { await store.put(rec); } catch (e) { toast("기록을 저장하지 못했어요."); }
     records.render();
@@ -917,7 +868,6 @@ const records = {
         const rec = { id: `ride_${startedAt}_${Math.random().toString(36).slice(2, 7)}`, name, startedAt, rate: imp.rate, imported: true,
           vert: imp.vert, lat: imp.lat, updatedAt: Date.now(), src: { name: f.name, size: f.size }, srcKey };
         if (imp.segs) rec.segs = imp.segs;
-        if (imp.baro) rec.baro = imp.baro;
         if (imp.zOnly) rec.zOnly = true;
         await store.put(rec); have.add(srcKey); ok++;
       } catch (e) { (e && e.code === Core.TXT_BAD ? notRide : bad).push(f.name); }
@@ -1083,16 +1033,6 @@ const settings = {
       <p>측정값은 휴대폰 센서로 구한 참고값이에요. 공식 승차감 검사를 대신하지 않아요.</p>
       <div class="acts"><button class="solid" id="dOk">확인</button></div>`, (b, close) => { b.querySelector("#dOk").onclick = close; });
     this.renderMode();
-    this.renderBaro();
-  },
-  /** 개발용 기압 기록 상태 (localhost로 열었을 때만 보임) */
-  renderBaro() {
-    const card = $("#baroCard"); if (!card) return;
-    card.hidden = !baro.isDev;
-    if (!baro.isDev) return;
-    $("#baroDesc").textContent = baro.bridgeOk
-      ? `측정할 때 기압을 함께 기록해요 (계산에는 쓰지 않아요)${baro.live ? ` · 지금 ${baro.live.toFixed(2)} hPa` : ""}`
-      : "기압 중계기가 꺼져 있어요. Termux에서 켜 주세요";
   },
   renderMode() {
     const mode = ctl.mode, seg = $("#modeSeg"), btns = [...seg.querySelectorAll("button")];
@@ -1417,7 +1357,6 @@ const installer = {
   settings.init();
   { const v = $("#appVer"); if (v) { v.textContent = APP_VERSION; v.onclick = () => owner.dialog(); } }   // 버전 글자: 주인 코드 입력
   ctl.init();
-  baro.connectBridge();
   glassGuard.check();
   nav.init();
   home.render();
