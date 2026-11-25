@@ -105,22 +105,22 @@ const videoMaker = (() => {
   }
   /** 유리 구슬 게이지 */
   function sphere(g, P, cx, cy, d, kind, level, main, sub, unit, t) {
-    const x = cx - d / 2, y = cy - d / 2;
+    const x = cx - d / 2, y = cy - d / 2, a0 = g.globalAlpha;   // 바깥에서 준 투명도(등장·퇴장)를 모든 층이 따르게 (2026-11-25)
     if (P.glass) g.drawImage(P.glass, x, y, d, d);
     g.save(); g.beginPath(); g.ellipse(cx, cy - d * .002, d * .4775, d * .46, 0, 0, Math.PI * 2); g.clip();
     const top = cy + d * .46 - Math.max(level > 0 ? .045 : 0, level) * d * .92;
     if (level > 0) {
       const c = KIND[kind], rg = g.createRadialGradient(x + d * .3, y + d * .34, 0, x + d * .3, y + d * .34, d * .82);
       rg.addColorStop(0, c[0]); rg.addColorStop(.55, c[1]); rg.addColorStop(1, c[2]);
-      g.globalCompositeOperation = P.dark ? "source-over" : "multiply"; g.globalAlpha = P.dark ? .88 : 1;
+      g.globalCompositeOperation = P.dark ? "source-over" : "multiply"; g.globalAlpha = a0 * (P.dark ? .88 : 1);
       g.beginPath(); g.moveTo(x, y + d);
       for (let k = 0; k <= 40; k++) { const px = x + d * k / 40; g.lineTo(px, top + Math.sin(k / 40 * Math.PI * 4 + t * 1.8) * d * .012); }
       g.lineTo(x + d, y + d); g.closePath(); g.fillStyle = rg; g.fill();
-      g.globalAlpha = 1; g.globalCompositeOperation = "source-over";
+      g.globalAlpha = a0; g.globalCompositeOperation = "source-over";
     }
     const vg = g.createRadialGradient(x + d * .42, y + d * .38, 0, x + d * .42, y + d * .38, d * .62); vg.addColorStop(.58, "rgba(0,0,0,0)"); vg.addColorStop(1, "rgba(0,0,0,.4)");
     g.fillStyle = vg; g.fillRect(x, y, d, d); g.restore();
-    if (P.glass) { g.save(); g.globalCompositeOperation = "screen"; g.globalAlpha = P.dark ? .75 : .38; g.drawImage(P.glass, x, y, d, d); g.restore(); }
+    if (P.glass) { g.save(); g.globalCompositeOperation = "screen"; g.globalAlpha = a0 * (P.dark ? .75 : .38); g.drawImage(P.glass, x, y, d, d); g.restore(); }
     // 숫자: 오른쪽 정렬 묶음, 단위는 아래
     const two = sub != null, ns = d * (two ? .2 : .25), us = d * .15;
     g.save(); g.fillStyle = "#fff"; g.textBaseline = "alphabetic"; g.shadowColor = "rgba(14,20,62,.38)"; g.shadowBlur = d * .03; g.shadowOffsetX = d * .008; g.shadowOffsetY = d * .012;
@@ -250,11 +250,11 @@ const videoMaker = (() => {
     let cfg = null; if (stillAt == null) for (const c of cfgs) { try { if ((await VideoEncoder.isConfigSupported(c)).supported) { cfg = c; break; } } catch (e) { /* 다음 */ } }
     if (!cfg && stillAt == null) throw new Error("이 기기에서는 2560×1190 영상을 만들 수 없어요.");
 
-    const A = analysisOf(rec), m = A.m, ev = m.eval, S = A.series, dark = document.documentElement.dataset.ui === "dark";
+    const A = analysisOf(rec), m = A.m, ev = m.eval, S = A.series, dark = false;   // 앱이 다크 모드여도 게이지 장면은 항상 라이트 디자인(확정 시안) (2026-11-25)
     const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
     const pal = (dark ? RAINBOW.dark : RAINBOW.light).slice(); for (let i = pal.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [pal[i], pal[j]] = [pal[j], pal[i]]; }
     try { await document.fonts.load(F(800, 40)); await document.fonts.load(F(200, 40)); await document.fonts.load(F(400, 20)); } catch (e) { /* 기본 글꼴 */ }
-    const P = { key: true, dark, ink: css("--ink"), ink2: css("--ink-2"), ink3: css("--ink-3"), colors: pal, glass: await loadImg(dark ? "assets/glass-dark.webp" : "assets/glass.webp") };
+    const P = { key: true, dark, ink: "#131A2B", ink2: "#48526A", ink3: "#8691A7", colors: pal, glass: await loadImg(dark ? "assets/glass-dark.webp" : "assets/glass.webp") };
     // 게이지가 사라진 뒤의 장면은 모두 다크 모드 디자인 (2026-11-25 사용자 확정). 무지개 순서는 같게
     const order = pal.map(c => (dark ? RAINBOW.dark : RAINBOW.light).indexOf(c));
     const P2 = { key: true, dark: true, ink: "#EEF2FF", ink2: "#A6B0CC", ink3: "#6B7594", colors: order.map(i => RAINBOW.dark[i]), glass: P.glass };
@@ -439,6 +439,7 @@ const videoMaker = (() => {
 
   /** 상세 화면의 영상 버튼 */
   async function run(rec) {
+    window.__vidBusy = true;
     let cancelled = false, close = null;
     dialog(`<h3>영상 만드는 중</h3><p id="vidP">0%</p><div class="vid-bar"><i id="vidB"></i></div>
       <div class="acts"><button id="dC">취소</button></div>`, (b, c) => { close = c; b.querySelector("#dC").onclick = () => { cancelled = true; }; });
@@ -453,6 +454,8 @@ const videoMaker = (() => {
     } catch (e) {
       close && close();
       toast(cancelled ? "영상 만들기를 취소했어요." : (e && e.message) || "영상을 만들지 못했어요.", 4500);
+    } finally {
+      setTimeout(() => { window.__vidBusy = false; }, 10000);   // 저장이 끝날 틈을 두고 나서야 새 버전으로 바꿀 수 있게
     }
   }
   return { make, run, mux };
