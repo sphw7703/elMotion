@@ -4,7 +4,7 @@
 /* ───────── 상수 ───────── */
 const FS = Core.FS;
 /* 앱 버전 (2026-11-25 사용자 확정): 0.큰 기능 묶음.고친 횟수 — 웹 앱 확정 때 1.0.0, 안드로이드 앱 때 2.0.0 */
-const APP_VERSION = "0.10.0";
+const APP_VERSION = "0.10.6";
 const LEGEND = { acc: 1.5, lat: 30, latA: 20, spd: 600 };   // 물 높이 범례 (화면에 표시하지 않음). lat: 실시간 p-p, latA: 기록의 |A95|
 const CUT = Math.round(Core.P.CUT_SEC * FS);
 const CUT_MANUAL = Math.round(0.3 * FS);   // 수동 모드 종료 시 버려지는 마지막 0.3초
@@ -91,7 +91,7 @@ const theme = {
   },
   set(p) { prefs.set("theme", p); this.apply(); },
 };
-const cssVar = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+const cssVar = n => (window.__cssOverride && window.__cssOverride[n]) || getComputedStyle(document.documentElement).getPropertyValue(n).trim();   // 영상 만들기 때 다크 색을 빌려 씀
 
 /* ───────── 유리 구슬 + 물 ───────── */
 let SPH = 0;
@@ -965,7 +965,7 @@ const detail = {
     charts.clear(box);
     box.innerHTML = `<div class="top" id="dHead"><button class="round-btn pop" id="dBack" aria-label="뒤로">${ICON.back}</button>
         <div class="tt"><h2></h2><div></div></div>
-        ${owner.on && isWide() ? `<button class="round-btn pop" id="dVid" aria-label="영상 만들기" title="영상 만들기 (1920×1080 · 60프레임)">${ICON.film}</button>` : ""}
+        ${owner.on ? `<button class="round-btn pop" id="dVid" aria-label="영상 만들기" title="영상 만들기 (2560×1190 · 60프레임)">${ICON.film}</button>` : ""}
         <button class="round-btn pop" id="dEdit" aria-label="이름 변경">${ICON.edit}</button>
         <button class="round-btn pop del" id="dDel" aria-label="기록 삭제">${ICON.del}</button></div>
       <div class="ai-box glass fade-in"><span class="ai-glow" aria-hidden="true"><i></i></span><span class="ai-chip">${ICON.aiStar}<span class="ai-t">AI 평가</span></span><p>${esc(ev.overall)}</p></div>

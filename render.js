@@ -1,5 +1,5 @@
 /* elMotion · 가로 화면 소개 영상 (mp4) — 주인만 (2026-11-25 사용자 확정)
-   1920×1080, 60프레임. 간단히의 게이지 3개 → 약 2.5초 뒤 자세히로 넘어가며 AI 평가 클로즈업 →
+   2560×1190, 60프레임. 간단히의 게이지 3개 → 약 2.5초 뒤 자세히로 넘어가며 AI 평가 클로즈업 →
    줌아웃되며 수치 카드 → 약 1.5초 뒤 스크롤되며 그래프 4개(가감속도·저크·상하·좌우)가 차례로 2×2.
    화면을 캡처하지 않고 프레임마다 캔버스에 직접 그린 뒤 WebCodecs(H.264)로 압축하고 MP4로 묶는다. */
 "use strict";
@@ -21,7 +21,7 @@ const owner = {
       <div class="acts"><button id="dC">취소</button><button class="solid" id="dS">확인</button></div>`, (b, close) => {
       const go = async () => {
         const ok = await this.check(b.querySelector("#ownI").value); close();
-        if (ok) { prefs.set("owner", OWNER_HASH); toast("이 기기에서 영상 만들기를 켰어요. 가로 화면의 기록에서 쓸 수 있어요.", 4200); }
+        if (ok) { prefs.set("owner", OWNER_HASH); toast("이 기기에서 영상 만들기를 켰어요. 기록 화면 위쪽의 영상 버튼으로 만들 수 있어요.", 4200); }
         else toast("코드가 맞지 않아요.");
       };
       b.querySelector("#dC").onclick = close; b.querySelector("#dS").onclick = go;
@@ -31,9 +31,14 @@ const owner = {
 };
 
 const videoMaker = (() => {
-  const W = 1920, H = 1080, FPS = 60, DUR = 14.5;
+  // 출력 2560×1190 (2026-11-25 사용자 확정). 그리기는 높이 1080 기준의 가상 좌표(폭 ≈ 2323)에서 하고 U배로 키워 담는다
+  const OW = 2560, OH = 1190, U = OH / 1080, W = OW / U, H = 1080, FPS = 60, DUR = 11.6;   // 그래프가 다 그려진 뒤 약 2.1초 머물고 끝
   const ease = t => (t <= 0 ? 0 : t >= 1 ? 1 : t < .5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2);
   const out = t => (t <= 0 ? 0 : t >= 1 ? 1 : 1 - Math.pow(1 - t, 3));
+  // 쫀득한 움직임 (2026-11-25 사용자 요청): 살짝 넘쳤다가 착 붙는 용수철
+  const spring = t => (t <= 0 ? 0 : t >= 1 ? 1 : 1 - Math.exp(-6 * t) * Math.cos(9.5 * t) * (1 - t));   // 넘침 약 9%
+  const glide = t => (t <= 0 ? 0 : t >= 1 ? 1 : 1 - Math.exp(-7 * t) * Math.cos(6.4 * t) * (1 - t * t));                         // 큰 이동: 넘침 약 3%
+  const KEY = "#00FF00";   // 크로마키 배경 (초록)
   const seg = (t, a, b) => clamp((t - a) / (b - a), 0, 1);
   const lerp = (a, b, k) => a + (b - a) * k;
 
@@ -81,6 +86,7 @@ const videoMaker = (() => {
   function loadImg(src) { return new Promise(ok => { const im = new Image(); im.onload = () => ok(im); im.onerror = () => ok(null); im.src = src; }); }
 
   function background(g, P) {
+    if (P.key) { g.fillStyle = KEY; g.fillRect(0, 0, W, H); return; }
     if (P.dark) {
       const lg = g.createLinearGradient(0, 0, 0, H); lg.addColorStop(0, "#0E1325"); lg.addColorStop(1, "#090C16"); g.fillStyle = lg; g.fillRect(0, 0, W, H);
       const glow = (cx, cy, rx, ry, col) => { g.save(); g.translate(cx, cy); g.scale(1, ry / rx); const r = g.createRadialGradient(0, 0, 0, 0, 0, rx); r.addColorStop(0, col); r.addColorStop(.7, "rgba(0,0,0,0)"); g.fillStyle = r; g.fillRect(-rx, -rx, 2 * rx, 2 * rx); g.restore(); };
@@ -93,8 +99,8 @@ const videoMaker = (() => {
   }
   function panel(g, P, x, y, w, h, r) {
     g.save(); rr(g, x, y, w, h, r);
-    if (!P.dark) { g.shadowColor = "rgba(27,42,99,.16)"; g.shadowBlur = 40; g.shadowOffsetY = 16; }
-    g.fillStyle = P.dark ? "rgba(255,255,255,.055)" : "rgba(255,255,255,.72)"; g.fill(); g.shadowColor = "transparent";
+    if (!P.dark && !P.key) { g.shadowColor = "rgba(27,42,99,.16)"; g.shadowBlur = 40; g.shadowOffsetY = 16; }
+    g.fillStyle = P.key ? "#0F131B" : P.dark ? "rgba(255,255,255,.055)" : "rgba(255,255,255,.72)"; g.fill(); g.shadowColor = "transparent";   // 영상(크로마키): 도형 속은 다크 모드 배경색
     g.strokeStyle = P.dark ? "rgba(255,255,255,.10)" : "rgba(255,255,255,.95)"; g.lineWidth = 1.5; g.stroke(); g.restore();
   }
   /** 유리 구슬 게이지 */
@@ -132,15 +138,65 @@ const videoMaker = (() => {
     g.fill(new Path2D("M12 2.5c.6 4.6 2.9 6.9 7.5 7.5v.1c-4.6.6-6.9 2.9-7.5 7.5h-.1c-.6-4.6-2.9-6.9-7.5-7.5V10c4.6-.6 6.9-2.9 7.5-7.5z")); g.restore();
   }
   /** AI 평가 상자 테두리 (빙글 도는 무지개 + 번지는 빛 + 유리 판) */
+  // 둥근 상자 둘레를 같은 길이로 나눈 점들 (시계 방향, 위 가운데에서 시작)
+  function ringPts(x, y, w, h, r, N) {
+    const sw = w - 2 * r, sh = h - 2 * r, q = Math.PI * r / 2, per = 2 * sw + 2 * sh + 4 * q, pts = [];
+    const at = d => {
+      d = ((d % per) + per) % per;
+      if (d < sw / 2) return [x + w / 2 + d, y]; d -= sw / 2;
+      if (d < q) { const a = -Math.PI / 2 + d / r; return [x + w - r + r * Math.cos(a), y + r + r * Math.sin(a)]; } d -= q;
+      if (d < sh) return [x + w, y + r + d]; d -= sh;
+      if (d < q) { const a = d / r; return [x + w - r + r * Math.cos(a), y + h - r + r * Math.sin(a)]; } d -= q;
+      if (d < sw) return [x + w - r - d, y + h]; d -= sw;
+      if (d < q) { const a = Math.PI / 2 + d / r; return [x + r + r * Math.cos(a), y + h - r + r * Math.sin(a)]; } d -= q;
+      if (d < sh) return [x, y + h - r - d]; d -= sh;
+      if (d < q) { const a = Math.PI + d / r; return [x + r + r * Math.cos(a), y + r + r * Math.sin(a)]; } d -= q;
+      return [x + r + d, y];
+    };
+    for (let i = 0; i <= N; i++) pts.push(at(per * i / N));
+    return pts;
+  }
+  const hexRgb = c => [parseInt(c.slice(1, 3), 16), parseInt(c.slice(3, 5), 16), parseInt(c.slice(5, 7), 16)];
+  // 무지개를 둘레 길이에 고르게 펴서 칠한 테두리 (원뿔 그라데이션은 긴 상자에서 색이 한쪽에 몰려서 바꿈)
+  function rainbowRing(g, C, pts, lw, shift) {
+    const n = C.length, R = C.map(hexRgb), N = pts.length - 1;
+    g.lineWidth = lw; g.lineCap = "round";
+    for (let i = 0; i < N; i++) {
+      let u = ((i + .5) / N * n * 1 + shift * n) % n; if (u < 0) u += n;      // 한 바퀴에 무지개 한 번
+      const k = Math.floor(u), f = u - k, A = R[k], B = R[(k + 1) % n], sm = f * f * (3 - 2 * f);
+      g.strokeStyle = `rgb(${A[0] + (B[0] - A[0]) * sm | 0},${A[1] + (B[1] - A[1]) * sm | 0},${A[2] + (B[2] - A[2]) * sm | 0})`;
+      g.beginPath(); g.moveTo(pts[i][0], pts[i][1]); g.lineTo(pts[i + 1][0], pts[i + 1][1]); g.stroke();
+    }
+  }
+  let glowCv = null;
+  /** AI 평가 상자: 무지개 빛 번짐 + 다크 배경 + 또렷한 무지개 테두리 (2026-11-25 보완) */
   function aiFrame(g, P, x, y, w, h, t) {
-    const r = 34, C = P.colors;
-    g.save();
-    const cg = g.createConicGradient(t * Math.PI * 2 / 6, x + w / 2, y + h / 2); C.forEach((c, i) => cg.addColorStop(i / C.length, c)); cg.addColorStop(1, C[0]);
-    g.filter = "blur(14px)"; g.globalAlpha *= P.dark ? .7 : .85; rr(g, x, y, w, h, r); g.lineWidth = 10; g.strokeStyle = cg; g.stroke(); g.filter = "none";
-    g.restore(); g.save();
-    panel(g, P, x, y, w, h, r);
-    rr(g, x, y, w, h, r); g.lineWidth = 3; g.strokeStyle = cg; g.stroke();
+    const r = 34, C = P.colors, shift = -t / 6, pts = ringPts(x, y, w, h, r, 360);
+    // 1) 빛 번짐: 따로 그린 두꺼운 테두리를 넓게·좁게 두 번 흐려 얹는다
+    if (!glowCv) { glowCv = document.createElement("canvas"); glowCv.width = OW; glowCv.height = OH; }
+    const og = glowCv.getContext("2d"), M = g.getTransform();
+    og.setTransform(1, 0, 0, 1, 0, 0); og.clearRect(0, 0, OW, OH); og.setTransform(M);
+    rainbowRing(og, C, pts, 22, shift);
+    const p0 = M.transformPoint(new DOMPoint(x - 140, y - 140)), p1 = M.transformPoint(new DOMPoint(x + w + 140, y + h + 140));
+    const sx = Math.max(0, Math.floor(p0.x)), sy = Math.max(0, Math.floor(p0.y)), ex = Math.min(OW, Math.ceil(p1.x)), ey = Math.min(OH, Math.ceil(p1.y));
+    const sc = Math.hypot(M.a, M.b), a0 = g.globalAlpha;
+    if (ex > sx && ey > sy) {
+      g.save(); g.setTransform(1, 0, 0, 1, 0, 0);
+      g.filter = `blur(${(40 * sc).toFixed(1)}px) saturate(190%)`; g.globalAlpha = a0; g.drawImage(glowCv, sx, sy, ex - sx, ey - sy, sx, sy, ex - sx, ey - sy);
+      g.filter = `blur(${(40 * sc).toFixed(1)}px) saturate(190%)`; g.drawImage(glowCv, sx, sy, ex - sx, ey - sy, sx, sy, ex - sx, ey - sy);
+      g.filter = `blur(${(13 * sc).toFixed(1)}px) saturate(170%)`; g.drawImage(glowCv, sx, sy, ex - sx, ey - sy, sx, sy, ex - sx, ey - sy);
+      g.filter = "none"; g.restore();
+    }
+    // 2) 상자 속: 다크 모드 배경색 + 앱처럼 모서리에 무지개 빛이 살짝 고임
+    g.save(); rr(g, x, y, w, h, r); g.fillStyle = "#0F131B"; g.fill(); g.clip();
+    const tint = (cx, cy, rad, c, al) => { const rg = g.createRadialGradient(cx, cy, 0, cx, cy, rad); const [R0, G0, B0] = hexRgb(c);
+      rg.addColorStop(0, `rgba(${R0},${G0},${B0},${al})`); rg.addColorStop(1, `rgba(${R0},${G0},${B0},0)`); g.fillStyle = rg; g.fillRect(x, y, w, h); };
+    tint(x + w, y + h, Math.min(w * .5, 700), C[2], .16);
+    tint(x, y, Math.min(w * .4, 520), C[0], .12);
     g.restore();
+    // 3) 또렷한 테두리 + 안쪽 얇은 빛
+    g.save(); rainbowRing(g, C, pts, 4, shift); g.restore();
+    g.save(); rr(g, x + 3, y + 3, w - 6, h - 6, r - 3); g.lineWidth = 1; g.strokeStyle = "rgba(255,255,255,.10)"; g.stroke(); g.restore();
   }
   /** AI 평가 내용 (유리 칩 + 글). (x, y): 상자 왼쪽 위, k: 배율 */
   function aiContent(g, P, x, y, t, L, k) {
@@ -187,25 +243,48 @@ const videoMaker = (() => {
   }
 
   /** 기록 하나 → 영상 */
-  async function make(rec, onProgress, isCancelled) {
-    if (typeof VideoEncoder === "undefined" || typeof VideoFrame === "undefined") throw new Error("이 브라우저는 영상 만들기를 지원하지 않아요. 크롬 최신 버전에서 해 주세요.");
-    const cfgs = ["avc1.64002A", "avc1.640028", "avc1.4D402A", "avc1.42002A"].map(codec => ({ codec, width: W, height: H, bitrate: 14e6, framerate: FPS, avc: { format: "avc" }, latencyMode: "quality" }));
-    let cfg = null; for (const c of cfgs) { try { if ((await VideoEncoder.isConfigSupported(c)).supported) { cfg = c; break; } } catch (e) { /* 다음 */ } }
-    if (!cfg) throw new Error("이 기기에서는 1920×1080 영상을 만들 수 없어요.");
+  async function make(rec, onProgress, isCancelled, stillAt) {
+    if (stillAt == null && typeof VideoEncoder === "undefined" || typeof VideoFrame === "undefined") throw new Error("이 브라우저는 영상 만들기를 지원하지 않아요. 크롬 최신 버전에서 해 주세요.");
+    // 2560×1190은 H.264 레벨 5.1 이상이 필요하다
+    const cfgs = ["avc1.640033", "avc1.640034", "avc1.4D4033", "avc1.420033", "avc1.640032"].map(codec => ({ codec, width: OW, height: OH, bitrate: 22e6, framerate: FPS, avc: { format: "avc" }, latencyMode: "quality" }));
+    let cfg = null; if (stillAt == null) for (const c of cfgs) { try { if ((await VideoEncoder.isConfigSupported(c)).supported) { cfg = c; break; } } catch (e) { /* 다음 */ } }
+    if (!cfg && stillAt == null) throw new Error("이 기기에서는 2560×1190 영상을 만들 수 없어요.");
 
     const A = analysisOf(rec), m = A.m, ev = m.eval, S = A.series, dark = document.documentElement.dataset.ui === "dark";
     const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
     const pal = (dark ? RAINBOW.dark : RAINBOW.light).slice(); for (let i = pal.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [pal[i], pal[j]] = [pal[j], pal[i]]; }
     try { await document.fonts.load(F(800, 40)); await document.fonts.load(F(200, 40)); await document.fonts.load(F(400, 20)); } catch (e) { /* 기본 글꼴 */ }
-    const P = { dark, ink: css("--ink"), ink2: css("--ink-2"), ink3: css("--ink-3"), colors: pal, glass: await loadImg(dark ? "assets/glass-dark.webp" : "assets/glass.webp") };
+    const P = { key: true, dark, ink: css("--ink"), ink2: css("--ink-2"), ink3: css("--ink-3"), colors: pal, glass: await loadImg(dark ? "assets/glass-dark.webp" : "assets/glass.webp") };
+    // 게이지가 사라진 뒤의 장면은 모두 다크 모드 디자인 (2026-11-25 사용자 확정). 무지개 순서는 같게
+    const order = pal.map(c => (dark ? RAINBOW.dark : RAINBOW.light).indexOf(c));
+    const P2 = { key: true, dark: true, ink: "#EEF2FF", ink2: "#A6B0CC", ink3: "#6B7594", colors: order.map(i => RAINBOW.dark[i]), glass: P.glass };
+    const DARK_CSS = { "--ink": "#EEF2FF", "--ink-2": "#A6B0CC", "--ink-3": "#6B7594", "--line": "rgba(255, 255, 255, .08)" };
 
-    const cv = document.createElement("canvas"); cv.width = W; cv.height = H; const g = cv.getContext("2d");
+    const cv = document.createElement("canvas"); cv.width = OW; cv.height = OH; const g = cv.getContext("2d");
     // 장면 1: 간단히 게이지 3개
     const gauges = [
-      { k: "acc", lbl: "가감속도", lv: m.accPeak / LEGEND.acc, a: m.accMax.toFixed(2), b: m.decMax.toFixed(2), u: "m/s²" },
-      { k: "lat", lbl: "좌우 흔들림", lv: m.vibL && m.vibL.n ? m.vibL.a95 / LEGEND.latA : 0, a: m.vibL && m.vibL.n ? m.vibL.a95.toFixed(1) : "—", b: null, u: "gal" },
-      { k: "spd", lbl: "속력", lv: m.speedMax / LEGEND.spd, a: m.speedMax.toFixed(1), b: null, u: "m/min" },
+      { k: "acc", lbl: "가감속도", lv: m.accPeak / LEGEND.acc, a: m.accMax.toFixed(2), bv: m.decMax.toFixed(2), u: "m/s²" },
+      { k: "lat", lbl: "좌우 흔들림", lv: m.vibL && m.vibL.n ? m.vibL.a95 / LEGEND.latA : 0, a: m.vibL && m.vibL.n ? m.vibL.a95.toFixed(1) : "—", bv: null, u: "gal" },
+      { k: "spd", lbl: "속력", lv: m.speedMax / LEGEND.spd, a: m.speedMax.toFixed(1), bv: null, u: "m/min" },
     ];
+    // 게이지 아래 글 (간단히 화면과 같은 내용): 위 라벨은 앱의 3배, 아래 글은 2배 (1920 폭 기준 76 · 64 · 44px)
+    const sent = x => (/[.!?요]$/.test(x) ? (/[요]$/.test(x) ? x + "." : x) : x + ".");
+    const accB = /^가속은 .+ 감속은 /.test(ev.acc.t) ? ev.acc.t.replace(/ 감속은 /, ",\n감속은 ").split("\n").map((l, i) => (i ? sent(l) : l)) : [sent(ev.acc.t)];
+    gauges[0].b = accB; gauges[0].bl = -1; gauges[0].p = "";                                     // '가속 최대 ~' 줄은 뺌 (사용자 확정)
+    if (m.vibL && m.vibL.n) { gauges[1].b = [ev.vibL.s]; gauges[1].bl = ev.vibL.lv; gauges[1].bScale = 1.3; /* '좋음' 같은 등급 글자는 130% */ gauges[1].p = ev.vibL.line.replace(/ · 약 [\d.]+ Hz$/, ""); /* '약 7.5 Hz'는 뺌 */ }
+    else { gauges[1].b = ["기록이 없어요."]; gauges[1].bl = -1; gauges[1].p = ""; }
+    gauges[2].b = [ev.speed.t.replace(/요$/, "요.")]; gauges[2].bl = 0; gauges[2].p = "";
+    // 게이지: 크기는 예전(400)의 125% → 500, 사이 빈틈은 예전(가운데 간격 W/3 ≈ 774 − 400 = 374)의 1/2 → 187 (2026-11-25 사용자 확정)
+    const G1 = { lbl: 76, lblF: 114, drop: 50, b: 64, bLh: 80, p: 44, pLh: 56, d: 500, gap: 500 + (W / 3 - 400) / 2 };
+    G1.colW = G1.gap - 30;   // lbl: 자리 계산용, lblF: 실제 글자(1.5배)
+    G1.sp = (G1.lbl * .15 + 30 + G1.drop) * .8;   // 제목 글 ↔ 게이지 간격: 원래의 80% (2026-11-25)
+    // 숫자와 단위, '약 7.5 Hz' 같은 묶음은 줄이 바뀌어도 떨어지지 않게 붙여 둔다
+    const glue = x => x.replace(/(최대|약) ([\d.]+)/g, "$1\u00a0$2").replace(/([\d.]+) (m\/s²|gal|m\/min|Hz)/g, "$1\u00a0$2").replace(/ · /g, "\u00a0· ");
+    // 큰 글은 정해 둔 줄 그대로 (가속 줄·감속 줄), 작은 글만 옆 게이지 글과 겹치지 않을 폭에서 줄바꿈
+    g.font = F(400, G1.p); gauges.forEach(q => { q.pl = q.p ? wrap(g, glue(q.p), G1.colW - 60) : []; });
+    g.font = F(800, G1.b); gauges.forEach(q => { q.bl2 = q.b.slice(); });
+    const colH = q => G1.lbl + G1.sp + G1.d + 40 + q.bl2.length * G1.bLh * (q.bScale || 1) + (q.pl.length ? 12 + q.pl.length * G1.pLh : 0);
+    const G1top = Math.max(40, (H - Math.max(...gauges.map(colH))) / 2);
     // 자세히 배치 (1920 폭의 긴 쪽 위 좌표)
     const MX = 120, CW = W - 2 * MX;
     // AI 평가: 클로즈업 때는 글자를 크게 한 상자(배율 KH)로 화면 가운데에, 줌아웃되며 자세히의 자리로 옮겨 간다
@@ -236,24 +315,37 @@ const videoMaker = (() => {
       const chObj = new Chart(c, { values: S[k], rate: rec.rate, color: s.color, half: s.half, dec: s.dec, unit: s.unit, animate: false, marks: true, spans: (k === "vibV" || k === "vibL") && m.cruise.length ? m.cruise : null, pauses: m.pauses });
       return { s, c, ch: chObj, comment };
     });
-    const scrollTo = gy0 - 70;
+    const scrollTo = gy0 - 60;
 
     // 시간표 (초)
-    const T = { gIn: 0, gOut: 3.3, aiIn: 3.6, zoom: 6.4, zoomEnd: 7.6, cardsIn: 7.0, scroll: 9.4, scrollEnd: 10.6, chartsIn: 10.0, chartGap: 0.4 };
+    // 2026-11-25: 게이지·AI 평가는 움직임이 멎은 뒤 1초만 보여 주고, 그래프 4개는 한꺼번에 등장
+    //  게이지는 약 1.8초, AI 평가 상자는 등장 후 약 0.6초에 멎는다
+    const T = { gIn: 0, gOut: 2.8, aiIn: 3.1, zoom: 4.7, zoomEnd: 5.9, cardsIn: 5.3, scroll: 7.7, scrollEnd: 8.9, chartsIn: 8.3, chartGap: 0 };
     const drawFrame = t => {
-      g.setTransform(1, 0, 0, 1, 0, 0); g.globalAlpha = 1; g.filter = "none";
+      g.setTransform(U, 0, 0, U, 0, 0); g.globalAlpha = 1; g.filter = "none";
       background(g, P);
       // ── 장면 1: 게이지
-      const kOut = ease(seg(t, T.gOut, T.gOut + .6));
+      const kOut = ease(seg(t, T.gOut, T.gOut + .55));
       if (kOut < 1) {
         g.save(); g.globalAlpha = 1 - kOut; g.translate(W / 2, H / 2); g.scale(1 + kOut * .06, 1 + kOut * .06); g.translate(-W / 2, -H / 2 - kOut * 40);
-        const d = 400, gap = 560;
+        const d = G1.d, gap = G1.gap;
         gauges.forEach((q, i) => {
-          const kIn = out(seg(t, .15 + i * .12, .75 + i * .12)), x = W / 2 + (i - 1) * gap, y = H / 2 + 50;
-          g.save(); g.globalAlpha *= kIn; g.translate(x, y); g.scale(.86 + .14 * kIn, .86 + .14 * kIn); g.translate(-x, -y);
-          g.fillStyle = P.ink2; g.font = F(800, 34); g.textAlign = "center"; g.fillText(q.lbl, x, y - d / 2 - 34);
-          const lv = clamp(q.lv, q.a === "—" ? 0 : .03, 1) * ease(seg(t, .5 + i * .15, 1.9 + i * .15));
-          sphere(g, P, x, y, d, q.k, lv, q.a, q.b, q.u, t);
+          const t0 = .15 + i * .12, kIn = spring(seg(t, t0, t0 + .9)), kA = out(seg(t, t0, t0 + .35)), x = W / 2 + (i - 1) * gap;
+          const yL = G1top + G1.lbl, y = G1top + G1.lbl + G1.sp + d / 2;
+          g.save(); g.globalAlpha *= kA; g.translate(x, y); g.scale(.7 + .3 * kIn, .7 + .3 * kIn); g.translate(-x, -y);
+          g.fillStyle = P.ink2; g.font = F(800, G1.lblF); g.textAlign = "center"; g.textBaseline = "alphabetic"; g.fillText(q.lbl, x, yL);
+          const lv = clamp(q.lv, q.a === "—" ? 0 : .03, 1) * glide(seg(t, .5 + i * .15, 2.1 + i * .15));
+          sphere(g, P, x, y, d, q.k, lv, q.a, q.bv, q.u, t);
+          g.restore();
+          // 아래 글: 게이지보다 살짝 늦게 통 올라옴
+          const kT = spring(seg(t, t0 + .25, t0 + 1.15)), kTA = out(seg(t, t0 + .25, t0 + .6));
+          g.save(); g.globalAlpha *= kTA; g.translate(0, (1 - kT) * 46); g.textAlign = "center";
+          const bs = q.bScale || 1;
+          let yy = y + d / 2 + 40 + G1.b * bs * .82;
+          g.font = F(800, G1.b * bs); g.fillStyle = q.bl >= 0 ? (P.dark ? LV.dark : LV.light)[q.bl] : P.ink;
+          q.bl2.forEach(l => { g.fillText(l, x, yy); yy += G1.bLh * bs; });
+          g.font = F(400, G1.p); g.fillStyle = P.ink2; yy += 12 - G1.bLh * bs + G1.pLh;
+          q.pl.forEach(l => { g.fillText(l, x, yy); yy += G1.pLh; });
           g.restore();
         });
         g.restore();
@@ -261,37 +353,41 @@ const videoMaker = (() => {
       // ── 장면 2~4: 자세히 (카메라: 클로즈업 → 줌아웃 → 스크롤)
       if (t >= T.gOut + .2) {
         const fade = out(seg(t, T.gOut + .2, T.aiIn + .5));
-        const z = ease(seg(t, T.zoom, T.zoomEnd)), sc = ease(seg(t, T.scroll, T.scrollEnd));
+        const z = glide(seg(t, T.zoom, T.zoomEnd + .3)), sc = glide(seg(t, T.scroll, T.scrollEnd + .3));
         // 줌아웃: 카드·그래프는 크게 다가와 있던 데서 제자리로 (가운데 기준 1.25 → 1)
         const s = lerp(1.25, 1, z), fy = H / 2 + sc * scrollTo;
+        const gone = 1 - out(seg(t, T.scroll + .1, T.scroll + .75));       // 스크롤하며 위쪽(AI 평가·수치 카드)은 사라짐
         g.save(); g.globalAlpha = fade; g.translate(W / 2, H / 2); g.scale(s, s); g.translate(-W / 2, -fy);
         // AI 평가: 클로즈업 상자 → 자세히 자리 (테두리는 하나로 옮겨 가고, 글은 큰 글 → 보통 글로 겹쳐 바뀜)
         {
-          const aiK = out(seg(t, T.aiIn, T.aiIn + .7));
-          g.save(); g.setTransform(1, 0, 0, 1, 0, 0); g.globalAlpha = fade * aiK;
+          const aiK = out(seg(t, T.aiIn, T.aiIn + .45)), aiS = spring(seg(t, T.aiIn, T.aiIn + 1.0));
+          g.save(); g.setTransform(U, 0, 0, U, 0, 0); g.globalAlpha = fade * aiK * gone;
+          if (aiS < 1 && z === 0) { g.translate(W / 2, H / 2); g.scale(.82 + .18 * aiS, .82 + .18 * aiS); g.translate(-W / 2, -H / 2); }
           const sy = -sc * scrollTo;                                   // 스크롤할 때는 함께 올라간다
-          const R = { x: lerp(hero.x, ai.x, z), y: lerp(hero.y, ai.y, z) + sy + (1 - aiK) * 24, w: lerp(hero.w, ai.w, z), h: lerp(hero.h, ai.h, z) };
-          aiFrame(g, P, R.x, R.y, R.w, R.h, t);
+          const R = { x: lerp(hero.x, ai.x, z), y: lerp(hero.y, ai.y, z) + sy, w: lerp(hero.w, ai.w, z), h: lerp(hero.h, ai.h, z) };
+          aiFrame(g, P2, R.x, R.y, R.w, R.h, t);
           g.save(); rr(g, R.x, R.y, R.w, R.h, 34); g.clip();
-          const kz = lerp(KH, 1, z);
-          const zh = clamp(1 - 2 * z, 0, 1), zp = clamp(2 * z - 1, 0, 1);          // 앞 절반은 큰 글이 사라지고, 뒤 절반에 보통 글이 나타남
-          if (zh > 0) { g.globalAlpha = fade * aiK * zh; aiContent(g, P, R.x, R.y, t, LH, kz); }
-          if (zp > 0) { g.globalAlpha = fade * aiK * zp; aiContent(g, P, R.x, R.y, t, LP, kz); }
+          const kz = lerp(KH, 1, z), zc = clamp(z, 0, 1);
+          const zh = clamp(1 - 2 * zc, 0, 1), zp = clamp(2 * zc - 1, 0, 1);          // 앞 절반은 큰 글이 사라지고, 뒤 절반에 보통 글이 나타남
+          if (zh > 0) { g.globalAlpha = fade * aiK * zh; aiContent(g, P2, R.x, R.y, t, LH, kz); }
+          if (zp > 0) { g.globalAlpha = fade * aiK * zp; aiContent(g, P2, R.x, R.y, t, LP, kz); }
           g.restore(); g.restore();
         }
         cards.forEach((c, i) => {
-          const k = out(seg(t, T.cardsIn + i * .07, T.cardsIn + .5 + i * .07)); if (k <= 0) return;
-          g.save(); g.globalAlpha *= k; g.translate(0, (1 - k) * 30); card(g, P, c, MX + i * (cw + CG), cy0, cw, ch); g.restore();
+          const t0 = T.cardsIn + i * .07, k = out(seg(t, t0, t0 + .3)) * gone, kS = spring(seg(t, t0, t0 + .85)); if (k <= 0) return;
+          const x = MX + i * (cw + CG) + cw / 2, y = cy0 + ch / 2;
+          g.save(); g.globalAlpha *= k; g.translate(x, y + (1 - kS) * 60); g.scale(.85 + .15 * kS, .85 + .15 * kS); g.translate(-x, -y);
+          card(g, P2, c, MX + i * (cw + CG), cy0, cw, ch); g.restore();
         });
         charts4.forEach((q, i) => {
-          const t0 = T.chartsIn + i * T.chartGap, k = out(seg(t, t0, t0 + .5)); if (k <= 0) return;
+          const t0 = T.chartsIn + i * T.chartGap, k = out(seg(t, t0, t0 + .3)), kS = spring(seg(t, t0, t0 + .9)); if (k <= 0) return;
           const x = MX + (i % 2) * (gw + GG), y = gy0 + Math.floor(i / 2) * (gh + GG);
-          g.save(); g.globalAlpha *= k; g.translate(0, (1 - k) * 34);
-          panel(g, P, x, y, gw, gh, 30);
-          g.textBaseline = "alphabetic"; g.textAlign = "left"; g.fillStyle = P.ink; g.font = F(800, 26); g.fillText(q.s.title, x + 24, y + 48);
-          const tw = g.measureText(q.s.title).width; g.fillStyle = P.ink3; g.font = F(400, 19); g.fillText(q.s.unit, x + 24 + tw + 10, y + 48);
+          g.save(); g.globalAlpha *= k; g.translate(x + gw / 2, y + gh / 2 + (1 - kS) * 70); g.scale(.9 + .1 * kS, .9 + .1 * kS); g.translate(-x - gw / 2, -y - gh / 2);
+          panel(g, P2, x, y, gw, gh, 30);
+          g.textBaseline = "alphabetic"; g.textAlign = "left"; g.fillStyle = P2.ink; g.font = F(800, 26); g.fillText(q.s.title, x + 24, y + 48);
+          const tw = g.measureText(q.s.title).width; g.fillStyle = P2.ink3; g.font = F(400, 19); g.fillText(q.s.unit, x + 24 + tw + 10, y + 48);
           g.textAlign = "right"; g.font = F(700, 19); g.fillText(q.comment || "", x + gw - 24, y + 48);
-          q.ch.prog = ease(seg(t, t0 + .1, t0 + 1.2)); q.ch.cursor = -1; q.ch.draw();
+          q.ch.prog = ease(seg(t, t0 + .1, t0 + 1.2)); q.ch.cursor = -1; window.__cssOverride = DARK_CSS; try { q.ch.draw(); } finally { window.__cssOverride = null; }
           g.drawImage(q.c, x + 10, y + 64, gw - 20, gh - 74);
           g.restore();
         });
@@ -299,6 +395,19 @@ const videoMaker = (() => {
       }
     };
 
+    // 모션 블러 (2026-11-25 사용자 요청): 움직이는 구간은 프레임 반 동안(셔터 180°) 4번 그려 평균, 멈춘 구간은 한 번
+    const fcv = document.createElement("canvas"); fcv.width = OW; fcv.height = OH; const fg = fcv.getContext("2d");
+    const MOVING = [[.1, 2.4], [T.gOut - .05, T.aiIn + 1.1], [T.zoom - .05, T.zoomEnd + .9], [T.scroll - .05, T.chartsIn + 3 * T.chartGap + 1.3]];
+    const renderFrame = t => {
+      const K = MOVING.some(([a, b]) => t >= a && t <= b) ? 4 : 1;
+      if (K === 1) { drawFrame(t); fg.globalAlpha = 1; fg.drawImage(cv, 0, 0); return; }
+      for (let j = 0; j < K; j++) { drawFrame(t + (j / (K - 1) - .5) * (.5 / FPS)); fg.globalAlpha = 1 / (j + 1); fg.drawImage(cv, 0, 0); }
+      fg.globalAlpha = 1;
+    };
+    if (stillAt != null) {            // 한 장면만 그림으로
+      try { renderFrame(stillAt); return await new Promise(ok => fcv.toBlob(ok, "image/png")); }
+      finally { charts4.forEach(q => q.ch.destroy()); host.remove(); }
+    }
     const samples = []; let avcC = null, err = null;
     const encoder = new VideoEncoder({
       output: (chunk, meta) => { const d = new Uint8Array(chunk.byteLength); chunk.copyTo(d); samples.push({ data: d, key: chunk.type === "key" });
@@ -311,8 +420,8 @@ const videoMaker = (() => {
       for (let i = 0; i < N; i++) {
         if (err) throw err;
         if (isCancelled && isCancelled()) throw new Error("취소");
-        drawFrame(i / FPS);
-        const fr = new VideoFrame(cv, { timestamp: Math.round(i * 1e6 / FPS), duration: Math.round(1e6 / FPS) });
+        renderFrame(i / FPS);
+        const fr = new VideoFrame(fcv, { timestamp: Math.round(i * 1e6 / FPS), duration: Math.round(1e6 / FPS) });
         encoder.encode(fr, { keyFrame: i % (FPS * 2) === 0 }); fr.close();
         while (encoder.encodeQueueSize > 6) await new Promise(r => setTimeout(r, 4));
         if (i % 6 === 0) { onProgress && onProgress(i / N); await new Promise(r => setTimeout(r, 0)); }
@@ -325,18 +434,17 @@ const videoMaker = (() => {
     if (err) throw err;
     if (!avcC) throw new Error("영상 정보를 만들지 못했어요.");
     onProgress && onProgress(1);
-    return mux(samples, avcC, W, H, FPS);
+    return mux(samples, avcC, OW, OH, FPS);
   }
 
   /** 상세 화면의 영상 버튼 */
   async function run(rec) {
-    if (!isWide()) { toast("가로 화면에서 만들 수 있어요."); return; }
     let cancelled = false, close = null;
     dialog(`<h3>영상 만드는 중</h3><p id="vidP">0%</p><div class="vid-bar"><i id="vidB"></i></div>
       <div class="acts"><button id="dC">취소</button></div>`, (b, c) => { close = c; b.querySelector("#dC").onclick = () => { cancelled = true; }; });
     $("#dlgBack").onclick = null;
     try {
-      const blob = await make(rec, p => { const t = Math.round(p * 100); const a = $("#vidP"), bb = $("#vidB"); if (a) a.textContent = `${t}% · 1920×1080 60프레임`; if (bb) bb.style.width = t + "%"; }, () => cancelled);
+      const blob = await make(rec, p => { const t = Math.round(p * 100); const a = $("#vidP"), bb = $("#vidB"); if (a) a.textContent = `${t}% · 2560×1190 60프레임`; if (bb) bb.style.width = t + "%"; }, () => cancelled);
       close && close();
       const name = ((rec.name || "").trim() || "elMotion").replace(/[\\/:*?"<>|]/g, "_") + "_elMotion.mp4";
       const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = name;
