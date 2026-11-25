@@ -66,7 +66,7 @@ const gsync = {
   async connect() {
     if (!(await this.askToken(""))) { toast("구글 드라이브에 연결하지 못했어요."); return; }
     try { const a = await (await this.api("drive/v3/about?fields=user(emailAddress)")).json(); if (a.user && a.user.emailAddress) prefs.set("sync.email", a.user.emailAddress); } catch (e) { /* 계정 표시만 못 함 */ }
-    this.on = true; this.render(); toast("구글 드라이브에 연결했어요. 기록을 맞출게요.");
+    this.on = true; this.render(); toast("구글 드라이브에 연결했어요. 동기화할게요.");
     this.run();
   },
   async disconnect() {
@@ -223,23 +223,21 @@ const gsync = {
   setState(s) { this.state = s; this.render(); },
   render() {
     const card = $("#syncCard"); if (!card) return;
-    const desc = $("#syncDesc"), btn = $("#syncBtn"), acts = $("#syncActs"), icons = $("#syncIcons"), line = $("#syncLine");
+    const desc = $("#syncDesc"), btn = $("#syncBtn"), acts = $("#syncActs"), icons = $("#syncIcons");   // 동기화 상태는 설정에서만 보여 준다 (2026-11-25)
     icons.hidden = !(this.ready && this.on);
-    $("#syncNow").classList.toggle("spin", this.state === "busy");      // 맞추는 중: 새로 고침 아이콘이 돈다
+    $("#syncNow").classList.toggle("spin", this.state === "busy");      // 동기화 중: 새로 고침 아이콘이 돈다
     const t = this.last ? fmtClock(this.last) : "";
     if (!this.ready) { desc.textContent = "준비 중이에요. 구글 앱 키를 넣으면 쓸 수 있어요."; btn.hidden = true; acts.hidden = true; }
-    else if (!this.on) { desc.textContent = "태블릿과 휴대폰의 기록을 구글 드라이브로 맞춰요."; btn.hidden = false; btn.textContent = "구글로 연결"; acts.hidden = true; }
+    else if (!this.on) { desc.textContent = "태블릿과 휴대폰의 기록을 구글 드라이브로 동기화해요."; btn.hidden = false; btn.textContent = "구글로 연결"; acts.hidden = true; }
     else {
       const who = prefs.get("sync.email", "");
-      desc.textContent = `${who ? who + " · " : ""}${this.state === "busy" ? "맞추는 중이에요" : t ? `${t}에 맞췄어요` : "연결됨"}`;
+      const st = this.state === "busy" ? "동기화 중..."
+        : this.state === "err" ? "동기화하지 못했어요. 새로 고침을 눌러 주세요"
+        : this.state === "offline" ? "신호가 돌아오면 동기화해요"
+        : this.state === "need" || (!this.tokenOk() && this.state !== "ok") ? (t ? `${t}에 동기화됨 · 새로 고침을 눌러 다시 동기화` : "새로 고침을 눌러 동기화해요")
+        : t ? `${t}에 동기화됨` : "연결됨";
+      desc.textContent = `${who ? who + " · " : ""}${st}`;
       btn.hidden = true; acts.hidden = false;
-    }
-    if (line) {
-      const msg = !this.on || !this.ready ? "" : {
-        busy: "기기 기록을 맞추는 중이에요", need: "눌러서 기기 기록 맞추기", offline: "신호가 돌아오면 기기 기록을 맞춰요",
-        err: "맞추지 못했어요 · 눌러서 다시", ok: t ? `${t}에 기기 기록을 맞췄어요` : "",
-      }[this.state] || (this.tokenOk() ? "" : "눌러서 기기 기록 맞추기");
-      line.hidden = !msg; line.textContent = msg; line.classList.toggle("tap", ["need", "err", ""].includes(this.state) && !this.tokenOk() || this.state === "err");
     }
   },
 };
@@ -278,4 +276,7 @@ async function fileKey(name, size) {
     return [...h.slice(0, 10)].map(x => x.toString(16).padStart(2, "0")).join("");
   } catch (e) { return encodeURIComponent(s).slice(0, 100); }
 }
-function fmtClock(t) { const d = new Date(t), p = n => String(n).padStart(2, "0"); return `${d.getMonth() + 1}/${d.getDate()} ${p(d.getHours())}:${p(d.getMinutes())}`; }
+function fmtClock(t) {   // 오늘이면 "16:50", 아니면 "11/24 16:50"
+  const d = new Date(t), n = new Date(), p = x => String(x).padStart(2, "0"), hm = `${p(d.getHours())}:${p(d.getMinutes())}`;
+  return d.toDateString() === n.toDateString() ? hm : `${d.getMonth() + 1}/${d.getDate()} ${hm}`;
+}

@@ -203,13 +203,11 @@ canvas.chart { display: block; width: 100%; height: 150px; touch-action: pan-y; 
 .set-row .t { flex: 1; }
 .set-row .t p { margin: 2px 0 0; font-size: 12.5px; color: var(--ink-2); }
 /* 기기 연동 (2026-11-25) */
-#syncCard [hidden], .sync-line[hidden] { display: none !important; }
+#syncCard [hidden] { display: none !important; }
 .sync-acts { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
 .sync-icons { display: flex; gap: 8px; flex: none; }
 #syncNow.spin svg { animation: syncSpin .9s linear infinite; }
 @keyframes syncSpin { to { transform: rotate(360deg); } }
-.sync-line { display: block; margin: 0 auto 10px; padding: 6px 14px; border: 0; border-radius: 999px; background: transparent; color: var(--ink-2); font: inherit; font-size: 12.5px; }
-.sync-line.tap { background: var(--glass-bg, rgba(255,255,255,.08)); color: var(--ink); cursor: pointer; }
 .trash-list { max-height: 50vh; overflow: auto; margin: 4px 0 8px; }
 .trash-row { display: flex; align-items: center; gap: 10px; padding: 10px 0; border-bottom: 1px solid var(--line, rgba(127,127,127,.18)); }
 .trash-row .t { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
@@ -552,7 +550,6 @@ body.selecting #recList { padding-bottom: 150px; }
           <button class="round-btn pop" id="btnExport" aria-label="파일 내보내기" title="파일 내보내기"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 14V3m0 0L8 7m4-4l4 4"/><path d="M4 15v3a3 3 0 003 3h10a3 3 0 003-3v-3"/></svg></button>
           <button class="round-btn pop" id="btnDelete" aria-label="기록 삭제" title="기록 삭제"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14"/></svg></button>
         </div>
-        <button class="sync-line" id="syncLine" hidden></button>
         <div class="rec-list" id="recList"></div>
       </section>
 
@@ -595,7 +592,7 @@ body.selecting #recList { padding-bottom: 150px; }
             <div class="t"><h3 style="margin:0">기기 연동</h3><p id="syncDesc"></p></div>
             <button class="pill-btn primary" id="syncBtn" hidden>구글로 연결</button>
             <div class="sync-icons" id="syncIcons" hidden>
-              <button class="round-btn pop" id="syncNow" aria-label="지금 맞추기" title="지금 맞추기"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 12a8 8 0 11-2.34-5.66"/><path d="M20 4v5h-5"/></svg></button>
+              <button class="round-btn pop" id="syncNow" aria-label="지금 동기화" title="지금 동기화"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 12a8 8 0 11-2.34-5.66"/><path d="M20 4v5h-5"/></svg></button>
               <button class="round-btn pop" id="syncTrash" aria-label="지운 기록" title="지운 기록"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14"/></svg></button>
             </div>
           </div>

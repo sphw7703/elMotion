@@ -4,7 +4,7 @@
 /* ───────── 상수 ───────── */
 const FS = Core.FS;
 /* 앱 버전 (2026-11-25 사용자 확정): 0.큰 기능 묶음.고친 횟수 — 웹 앱 확정 때 1.0.0, 안드로이드 앱 때 2.0.0 */
-const APP_VERSION = "0.11.6";
+const APP_VERSION = "0.11.7";
 const LEGEND = { acc: 1.5, lat: 30, latA: 20, spd: 600 };   // 물 높이 범례 (화면에 표시하지 않음). lat: 실시간 p-p, latA: 기록의 |A95|
 const CUT = Math.round(Core.P.CUT_SEC * FS);
 const CUT_MANUAL = Math.round(0.3 * FS);   // 수동 모드 종료 시 버려지는 마지막 0.3초
@@ -1171,8 +1171,8 @@ const help = {
 };
 
 /* ───────── 가로 스와이프 공통 ───────── */
-/** 세로로 쓸어 넘기기 (2026-11-25): 아래로 = 자세히, 자세히에서 위로 = 간단히
- *  내용이 스크롤되는 곳이라, 아래로는 맨 위에 있을 때만 · 위로는 맨 아래에 있을 때만 받는다 (스크롤과 겹치지 않게).
+/** 세로로 쓸어 넘기기 (2026-11-25 사용자 수정): 위로 쓸면 = 자세히, 자세히에서 아래로 쓸면 = 간단히
+ *  내용이 스크롤되는 곳이라, 위로는 맨 아래에 있을 때만 · 아래로는 맨 위에 있을 때만 받는다 (스크롤과 겹치지 않게).
  *  터치 이벤트로 받는다: 화면이 스크롤되기 시작해도 끝까지 따라가려고 */
 function vswipe(el, onDown, onUp, canStart = () => true) {
   let sx = 0, sy = 0, t0 = 0, on = false, atTop = false, atBottom = false;
@@ -1185,7 +1185,7 @@ function vswipe(el, onDown, onUp, canStart = () => true) {
     if (!on) return; on = false;
     const t = e.changedTouches[0], dx = t.clientX - sx, dy = t.clientY - sy, dt = performance.now() - t0;
     if (dt > 700 || Math.abs(dy) < 70 || Math.abs(dy) < Math.abs(dx) * 1.5) return;
-    if (dy > 0 && atTop) onDown(); else if (dy < 0 && atBottom) onUp();
+    if (dy < 0 && atBottom) onDown(); else if (dy > 0 && atTop) onUp();   // onDown = 자세히로, onUp = 간단히로
   }, { passive: true });
   el.addEventListener("touchcancel", () => { on = false; }, { passive: true });
 }
@@ -1235,7 +1235,7 @@ const nav = {
     $("#navHome").onclick = () => this.go(1);
     $("#navSettings").onclick = () => this.go(2);
     $("#btnHelp").onclick = () => help.open();
-    // 홈(측정): 아래로 쓸면 자세히, 자세히에서 위로 쓸면 간단히
+    // 홈(측정): 위로 쓸면 자세히, 자세히에서 아래로 쓸면 간단히
     const okHome = e => this.page === 1 && !this.overlay && !e.target.closest("input, .seg, .switch, .hold");
     vswipe($("#pHome"), () => { if (!home.detail) { home.detail = true; home.render(); } }, () => { if (home.detail) { home.detail = false; home.render(); } }, okHome);
     // 기록 보기: 같은 방식 (자세히는 뒤로 가기 기록과 함께)
@@ -1428,7 +1428,6 @@ const installer = {
   $("#syncNow").onclick = () => gsync.now();
   $("#syncTrash").onclick = () => gsync.trash();
   $("#syncOff").onclick = () => gsync.disconnect();
-  $("#syncLine").onclick = () => gsync.now();
   $("#navSettings").addEventListener("click", () => gsync.preload());
   $("#navRecords").addEventListener("click", () => { if (gsync.on && gsync.tokenOk() && Date.now() - gsync.last > 60e3) gsync.soon(200); });
   $("#btnImport").onclick = () => $("#fileIn").click();
