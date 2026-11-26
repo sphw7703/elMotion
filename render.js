@@ -157,41 +157,35 @@ const videoMaker = (() => {
   }
   /** 경사형 직각삼각형 유리 게이지 (앱의 TriGauge와 같은 모양·색, 라이트). x, y: 왼쪽 위, d: 한 변 (2026-11-26)
       왼쪽 변 = 수직, 아래 변 = 앞뒤, along이 있으면 빗변 = 경사 방향. 단위는 오른쪽 아래 */
-  function triGauge(g, P, x, y, d, kind, level, vText, fText, t, unit, along) {
-    const a0 = g.globalAlpha, path = new Path2D(TriGauge.path());
+  function triGauge(g, P, x, y, d, kind, level, vText, fText, t, unit, along, labV = "수직", labF = "앞뒤") {
+    const a0 = g.globalAlpha;
     g.save(); g.translate(x, y); g.scale(d / 200, d / 200);
-    const sc = Math.hypot(g.getTransform().a, g.getTransform().b);
-    // 오른쪽 아래 두께 + 그림자 (2026-11-26) + 유리
-    g.save(); g.translate(6, 7); g.filter = `blur(${2.5 * sc}px)`; g.fillStyle = "rgba(27,42,99,.16)"; g.fill(path); g.restore();
-    g.save(); g.shadowColor = "rgba(27,42,99,.26)"; g.shadowBlur = 14 * sc; g.shadowOffsetX = 9 * sc; g.shadowOffsetY = 13 * sc; g.fillStyle = "rgba(255,255,255,.25)"; g.fill(path); g.restore();
-    const gb = g.createLinearGradient(0, 0, 200, 200); gb.addColorStop(0, "rgba(255,255,255,.62)"); gb.addColorStop(.55, "rgba(255,255,255,.22)"); gb.addColorStop(1, "rgba(255,255,255,.38)");
-    g.fillStyle = gb; g.fill(path);
-    // 물
-    g.save(); g.clip(path);
-    if (level > 0) {
-      const top = 186 - Math.max(level, .045) * 172, c = KIND[kind], rg = g.createRadialGradient(50, 140, 0, 50, 140, 190);
+    // 유리 이미지(사용자 제공) → 물(밝은 모드 곱하기) → 윗면 광택(화면 합성). 물은 따로 그려 유리 모양으로 잘라 얹는다
+    if (P.triGlass) g.drawImage(P.triGlass, 14, 14, 172, 172);
+    if (level > 0 && P.triSil) {
+      const sc = Math.min(1024, Math.ceil(172 * Math.hypot(g.getTransform().a, g.getTransform().b))), w = P.triW || (P.triW = document.createElement("canvas"));
+      if (w.width !== sc) w.width = w.height = sc;
+      const q = w.getContext("2d"); q.setTransform(1, 0, 0, 1, 0, 0); q.globalCompositeOperation = "source-over"; q.clearRect(0, 0, sc, sc); q.setTransform(sc / 172, 0, 0, sc / 172, -14 * sc / 172, -14 * sc / 172);
+      const top = 186 - Math.max(level, .045) * 172, c = KIND[kind], rg = q.createRadialGradient(50, 140, 0, 50, 140, 190);
       rg.addColorStop(0, c[0]); rg.addColorStop(.55, c[1]); rg.addColorStop(1, c[2]);
-      const wave = () => { for (let k = 0; k <= 40; k++) g.lineTo(k * 5, top + Math.sin(k / 40 * Math.PI * 4 + t * 1.8) * 3); };
-      g.beginPath(); g.moveTo(0, 200); wave(); g.lineTo(200, 200); g.closePath(); g.fillStyle = rg; g.fill();
-      g.beginPath(); wave(); g.strokeStyle = "rgba(255,255,255,.5)"; g.lineWidth = 1.4; g.stroke();
+      const wave = () => { for (let k = 0; k <= 40; k++) q.lineTo(k * 5, top + Math.sin(k / 40 * Math.PI * 4 + t * 1.8) * 3); };
+      q.beginPath(); q.moveTo(0, 200); wave(); q.lineTo(200, 200); q.closePath(); q.fillStyle = rg; q.fill();
+      q.beginPath(); wave(); q.strokeStyle = "rgba(255,255,255,.5)"; q.lineWidth = 1.4; q.stroke();
+      q.setTransform(1, 0, 0, 1, 0, 0); q.globalCompositeOperation = "destination-in"; q.drawImage(P.triSil, 0, 0, sc, sc);
+      g.save(); g.globalCompositeOperation = P.dark ? "source-over" : "multiply"; g.globalAlpha = a0 * (P.dark ? .88 : 1); g.drawImage(w, 14, 14, 172, 172); g.restore();
     }
-    const gt = g.createLinearGradient(0, 14, 0, 120); gt.addColorStop(0, "rgba(255,255,255,.7)"); gt.addColorStop(.35, "rgba(255,255,255,0)");
-    g.globalAlpha = a0 * .5; g.fillStyle = gt; g.beginPath(); g.moveTo(14, 14); g.lineTo(14, 120); g.lineTo(120, 120); g.closePath(); g.fill(); g.globalAlpha = a0;
-    g.restore();
-    g.lineJoin = "round";
-    g.strokeStyle = "rgba(255,255,255,.95)"; g.lineWidth = 2.2; g.stroke(path);
-    g.strokeStyle = "rgba(27,42,99,.10)"; g.lineWidth = 1; g.stroke(path);
+    if (P.triGlass) { g.save(); g.globalCompositeOperation = "screen"; g.globalAlpha = a0 * (P.dark ? .75 : .38); g.drawImage(P.triGlass, 14, 14, 172, 172); g.restore(); }
     g.restore();
     // 숫자 (앱과 같은 자리)
     const ns = d * .13, ls = d * .06, us = d * .065;
     g.save(); g.textBaseline = "alphabetic";
     g.font = F(800, ns); g.fillStyle = P.ink; g.textAlign = "right";
     const vx = x + d * .07 - 6, vy = y + d * .6 + ns * .1; g.fillText(vText, vx, vy);
-    g.font = F(700, ls); g.fillStyle = P.ink3; g.fillText("수직", vx, vy + ls * 1.25);
-    g.font = F(800, ns); const fw = g.measureText(fText).width; g.font = F(700, ls); const lw = g.measureText("앞뒤").width;
+    g.font = F(700, ls); g.fillStyle = P.ink3; g.fillText(labV, vx, vy + ls * 1.25);
+    g.font = F(800, ns); const fw = g.measureText(fText).width; g.font = F(700, ls); const lw = g.measureText(labF).width;
     const fx = x + d * .5 - (fw + 8 + lw) / 2, fy = y + d * .95 + 4 + ns * .92;
     g.textAlign = "left"; g.font = F(800, ns); g.fillStyle = P.ink; g.fillText(fText, fx, fy);
-    g.font = F(700, ls); g.fillStyle = P.ink3; g.fillText("앞뒤", fx + fw + 8, fy);
+    g.font = F(700, ls); g.fillStyle = P.ink3; g.fillText(labF, fx + fw + 8, fy);
     if (along != null) {
       const sx = x + d * .58, sy = y + d * .47 + ns * .1;
       g.font = F(800, ns); g.fillStyle = P.ink; g.fillText(along, sx, sy);
@@ -338,7 +332,8 @@ const videoMaker = (() => {
     const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
     const pal = (dark ? RAINBOW.dark : RAINBOW.light).slice(); for (let i = pal.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [pal[i], pal[j]] = [pal[j], pal[i]]; }
     try { await document.fonts.load(F(800, 40)); await document.fonts.load(F(200, 40)); await document.fonts.load(F(400, 20)); } catch (e) { /* 기본 글꼴 */ }
-    const P = { key: true, dark, ink: "#131A2B", ink2: "#48526A", ink3: "#8691A7", colors: pal, glass: await loadImg(dark ? "assets/glass-dark.webp" : "assets/glass.webp") };
+    const P = { key: true, dark, ink: "#131A2B", ink2: "#48526A", ink3: "#8691A7", colors: pal, glass: await loadImg(dark ? "assets/glass-dark.webp" : "assets/glass.webp"),
+      triGlass: await loadImg(dark ? "assets/glass-tri-dark.webp" : "assets/glass-tri.webp"), triSil: await loadImg("assets/glass-tri-sil.webp") };
     // 게이지가 사라진 뒤의 장면은 모두 다크 모드 디자인 (2026-11-25 사용자 확정). 무지개 순서는 같게
     const order = pal.map(c => (dark ? RAINBOW.dark : RAINBOW.light).indexOf(c));
     const P2 = { key: true, dark: true, ink: "#EEF2FF", ink2: "#A6B0CC", ink3: "#6B7594", colors: order.map(i => RAINBOW.dark[i]), glass: P.glass };
@@ -365,12 +360,12 @@ const videoMaker = (() => {
     const I = m.incl, TRI = !!I;
     if (I) {
       const sn = Math.sin(I.theta * Math.PI / 180), along = I.speedAlong != null ? I.speedAlong : m.speedMax / sn;
-      const worse = [ev.vibV, ev.vibF, ev.vibL].filter(x => x && x.lv >= 0).sort((a, b) => b.lv - a.lv)[0] || { lv: -1, s: "기록이 없어요." };
+      const worse = [ev.vibF, ev.vibL].filter(x => x && x.lv >= 0).sort((a, b) => b.lv - a.lv)[0] || { lv: -1, s: "기록이 없어요." };
       gauges[0].lbl = "가감속도"; gauges[0].lv = m.accPeak / sn / LEGEND_INC.acc; gauges[0].a = Math.max(m.accMax, m.decMax).toFixed(2); gauges[0].bv = Math.max(I.accMax, I.decMax).toFixed(2);
-      gauges[1].lbl = "흔들림"; gauges[1].lv = Math.max(m.vibV ? m.vibV.p98 : 0, I.vibF.p98) / LEGEND_INC.lat;
-      gauges[1].a = m.vibV && m.vibV.n ? m.vibV.p98.toFixed(1) : "—"; gauges[1].bv = I.vibF.n ? I.vibF.p98.toFixed(1) : "—";
+      gauges[1].lbl = "흔들림"; gauges[1].lv = Math.max(m.vibL ? m.vibL.p98 : 0, I.vibF.p98) / LEGEND_INC.lat;
+      gauges[1].a = I.vibF.n ? I.vibF.p98.toFixed(1) : "—"; gauges[1].bv = m.vibL && m.vibL.n ? m.vibL.p98.toFixed(1) : "—"; gauges[1].lv1 = "앞뒤"; gauges[1].lf1 = "좌우";
       gauges[1].b = [worse.s]; gauges[1].bl = worse.lv; gauges[1].bScale = 1.3;
-      gauges[1].p = [ev.vibV.line, ev.vibF && ev.vibF.line].filter(Boolean).map(l => l.replace(/ · 약 [\d.]+ Hz$/, "")).join("\n");   // 위아래 · 앞뒤 줄을 나눠서
+      gauges[1].p = [ev.vibF && ev.vibF.line, ev.vibL && ev.vibL.line].filter(Boolean).map(l => l.replace(/ · 약 [\d.]+ Hz$/, "")).join("\n");   // 앞뒤 · 좌우 줄을 나눠서
       gauges[2].lv = along / LEGEND_INC.spd; gauges[2].a = m.speedMax.toFixed(1); gauges[2].bv = I.speedMax.toFixed(1);
       gauges[2].al = along.toFixed(1); gauges[2].b = [ev.speed.t.replace(/요$/, "요.")]; gauges[2].bl = -1;
     }
@@ -458,7 +453,7 @@ const videoMaker = (() => {
           g.save(); g.globalAlpha *= kA; g.translate(x, y); g.scale(.7 + .3 * kIn, .7 + .3 * kIn); g.translate(-x, -y);
           g.fillStyle = P.ink2; g.font = F(800, G1.lblF); g.textAlign = "center"; g.textBaseline = "alphabetic"; g.fillText(q.lbl, x, yL);
           const lv = clamp(q.lv, q.a === "—" ? 0 : .03, 1) * glide(seg(t, .5 + i * .15, 2.1 + i * .15));
-          if (TRI) triGauge(g, P, x - TRI_D / 2 + TRI_D * .05, y - d / 2, TRI_D, q.k, lv, q.a, q.bv, t, q.u, q.al);
+          if (TRI) triGauge(g, P, x - TRI_D / 2 + TRI_D * .05, y - d / 2, TRI_D, q.k, lv, q.a, q.bv, t, q.u, q.al, q.lv1, q.lf1);
           else sphere(g, P, x, y, d, q.k, lv, q.a, q.bv, q.u, t);
           g.restore();
           // 아래 글: 게이지보다 살짝 늦게 통 올라옴

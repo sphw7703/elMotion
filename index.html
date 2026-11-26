@@ -134,13 +134,13 @@ button:focus-visible, [tabindex]:focus-visible, input:focus-visible { outline: 2
 .tri { position: relative; width: var(--d); height: var(--d); flex: none; }
 .tri-svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
 /* 오른쪽 아래 그림자로 입체감 (2026-11-26): 살짝 비켜 놓은 두께 + 오른쪽 아래로 번지는 그림자 */
-.tri .tri-depth { fill: rgba(27,42,99,.16); filter: blur(2.5px); }
-.tri .tri-shadow { fill: rgba(255,255,255,.25); filter: drop-shadow(9px 13px 14px rgba(27,42,99,.26)); }
-.tri .tri-edge { stroke: rgba(27,42,99,.10); }
-:root[data-ui="dark"] .tri .tri-glass { opacity: .35; }
-:root[data-ui="dark"] .tri .tri-depth { fill: rgba(0,0,0,.5); }
-:root[data-ui="dark"] .tri .tri-shadow { fill: rgba(255,255,255,.06); filter: drop-shadow(9px 13px 16px rgba(0,0,0,.55)); }
-:root[data-ui="dark"] .tri .tri-edge { stroke: rgba(255,255,255,.12); }
+/* 경사형 유리 삼각형 (2026-11-26, 사용자 제공 이미지): 유리 → 물(밝은 모드는 곱하기) → 윗면 광택(화면 합성). 다크 모드는 어두운 유리 이미지 */
+.tri .tg-d, :root[data-ui="dark"] .tri .tg-l { display: none; }
+:root[data-ui="dark"] .tri .tg-d { display: inline; }
+.tri .tg-w { mix-blend-mode: multiply; }
+:root[data-ui="dark"] .tri .tg-w { mix-blend-mode: normal; opacity: .88; }
+.tri .tg-top { mix-blend-mode: screen; opacity: .38; }
+:root[data-ui="dark"] .tri .tg-top { opacity: .75; }
 .tri .water { transition: transform .5s cubic-bezier(.3,.7,.3,1); }
 .tri .w1, .tri .wl { animation: wave 7s linear infinite; }
 .tri.k-acc { --wl: #6E80D4; --wm: #2C46BE; --wd: #17289A; }
@@ -234,7 +234,6 @@ canvas.chart { display: block; width: 100%; height: 150px; touch-action: pan-y; 
 .mini .ms.two b { font-size: 11.5px; line-height: 1; }   /* 모든 게이지: 큰 게이지처럼 숫자는 왼쪽, 단위는 오른쪽으로 살짝 */
 /* 기록 목록 경사형: 작은 삼각형 게이지, 숫자는 삼각형 왼쪽 아래 넓은 곳에 (2026-11-26) */
 .mini-tri .w1, .mini-tri .wl { animation: none; }
-.mini-tri .tri-depth { transform: translate(3px, 4px); }
 .minis:has(.mini-tri) { gap: 8px; }
 .rc-body:has(.mini-tri) .rc-line { margin-left: -22px; word-break: keep-all; }   /* 마지막 삼각형의 비어 있는 오른쪽 위로 당긴다 */
 .mini-tri .ms { position: absolute; left: 12%; bottom: 9%; z-index: 1; display: flex; flex-direction: column; align-items: flex-start; line-height: 1; }

@@ -4,7 +4,7 @@
 /* ───────── 상수 ───────── */
 const FS = Core.FS;
 /* 앱 버전 (2026-11-25 사용자 확정): 0.큰 기능 묶음.고친 횟수 — 웹 앱 확정 때 1.0.0, 안드로이드 앱 때 2.0.0 */
-const APP_VERSION = "0.13.12";
+const APP_VERSION = "0.13.13";
 const LEGEND = { acc: 1.5, lat: 30, latA: 20, spd: 600 };
 const LEGEND_INC = { acc: 1.0, lat: 80, spd: 90 };   // 경사형 게이지 범례 (2026-11-26 사용자 확정): 가감속 1.0 m/s², 흔들림 80 gal, 속력 90 m/min   // 물 높이 범례 (화면에 표시하지 않음). lat: 실시간 p-p, latA: 기록의 |98% 피크|
 const CUT = Math.round(Core.P.CUT_SEC * FS);
@@ -172,20 +172,15 @@ class TriGauge {
   }
   /** 유리 삼각형 SVG (실시간 게이지·기록 목록 공용) */
   static svg(id, d) {
+    const G = c => `<image class="${c}" href="assets/glass-tri${c.endsWith("d") ? "-dark" : ""}.webp" x="14" y="14" width="172" height="172"/>`;
     return `<svg viewBox="0 0 200 200" class="tri-svg" aria-hidden="true"><defs>
-      <clipPath id="c${id}"><path d="${d}"/></clipPath>
-      <linearGradient id="gb${id}" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#fff" stop-opacity=".62"/><stop offset=".55" stop-color="#fff" stop-opacity=".22"/><stop offset="1" stop-color="#fff" stop-opacity=".38"/></linearGradient>
       <radialGradient id="gw${id}" cx="25%" cy="70%" r="95%"><stop offset="0" style="stop-color:var(--wl)"/><stop offset=".55" style="stop-color:var(--wm)"/><stop offset="1" style="stop-color:var(--wd)"/></radialGradient>
-      <linearGradient id="gt${id}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fff" stop-opacity=".7"/><stop offset=".35" stop-color="#fff" stop-opacity="0"/></linearGradient>
+      <mask id="s${id}"><image href="assets/glass-tri-sil.webp" x="14" y="14" width="172" height="172"/></mask>
       <mask id="m${id}"><rect width="200" height="200" fill="#000"/><g class="water" style="transform:translateY(200px)"><path class="w1" d="${WAVE}" fill="#fff"/></g></mask></defs>
-      <path d="${d}" class="tri-depth" transform="translate(6 7)"/>
-      <path d="${d}" class="tri-shadow"/>
-      <path d="${d}" class="tri-glass" fill="url(#gb${id})"/>
-      <g clip-path="url(#c${id})"><rect width="200" height="200" fill="url(#gw${id})" mask="url(#m${id})"/>
-        <g class="water" style="transform:translateY(200px)"><path class="wl" d="${WAVE_LINE}" fill="none" stroke="rgba(255,255,255,.5)" stroke-width="1.4"/></g>
-        <path d="M14 14 L14 120 L120 120 Z" fill="url(#gt${id})" opacity=".5"/></g>
-      <path d="${d}" fill="none" stroke="rgba(255,255,255,.95)" stroke-width="2.2"/>
-      <path d="${d}" fill="none" class="tri-edge" stroke-width="1"/></svg>`;
+      ${G("tg-l")}${G("tg-d")}
+      <g mask="url(#s${id})"><g class="tg-w"><rect width="200" height="200" fill="url(#gw${id})" mask="url(#m${id})"/></g>
+        <g class="water" style="transform:translateY(200px)"><path class="wl" d="${WAVE_LINE}" fill="none" stroke="rgba(255,255,255,.5)" stroke-width="1.4"/></g></g>
+      ${G("tg-l tg-top")}${G("tg-d tg-top")}</svg>`;
   }
   constructor(kind, size, unit) {
     const id = "tg" + ++TRI, d = TriGauge.path();
