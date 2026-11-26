@@ -155,6 +155,55 @@ const videoMaker = (() => {
     g.font = F(200, us); g.fillStyle = "rgba(255,255,255,.88)"; g.fillText(unit, right + (two ? d * .05 : 0), yy + us * .95);
     g.restore();
   }
+  /** 경사형 직각삼각형 유리 게이지 (앱의 TriGauge와 같은 모양·색, 라이트). x, y: 왼쪽 위, d: 한 변 (2026-11-26) */
+  const TRI_C = { e: ["#C9CDD6", "#9EA4B2"], r: ["#FFFFFF", "#E4E7ED", "#C3C8D2", "#EEF0F4"], f: ["#F6F7F9", "#E3E6EC", "#C9CDD6"] };
+  function triGauge(g, P, x, y, d, kind, level, vText, fText, t) {
+    const T = TriGauge.path, a0 = g.globalAlpha;
+    const outer = new Path2D(T(0, 36)), inner = new Path2D(T(13, 24)), tube = new Path2D(T(6.5, 30)), tubeS = new Path2D(T(7.6, 29));
+    const ring = new Path2D(T(0, 36) + " " + T(13, 24));
+    const lin = (x0, y0, x1, y1, cs) => { const lg = g.createLinearGradient(x0, y0, x1, y1); cs.forEach((c, i) => lg.addColorStop(Array.isArray(c) ? c[0] : i / (cs.length - 1), Array.isArray(c) ? c[1] : c)); return lg; };
+    g.save(); g.translate(x, y); g.scale(d / 200, d / 200);
+    const sc = Math.hypot(g.getTransform().a, g.getTransform().b);
+    // 그림자 · 두께
+    g.save(); g.translate(4, 12); g.filter = `blur(${7 * sc}px)`; g.fillStyle = "rgba(27,42,99,.16)"; g.fill(outer); g.restore();
+    g.fillStyle = lin(0, 0, 200, 200, TRI_C.e);
+    for (let k = 7; k >= 1; k--) { g.save(); g.translate(k * .9, k); g.fill(outer); g.restore(); }
+    // 테두리 · 안쪽 면
+    g.globalAlpha = a0 * .92; g.fillStyle = lin(0, 0, 200, 200, [[0, TRI_C.r[0]], [.45, TRI_C.r[1]], [.75, TRI_C.r[2]], [1, TRI_C.r[3]]]); g.fill(ring, "evenodd"); g.globalAlpha = a0;
+    g.fillStyle = lin(0, 0, 200, 70, [[0, TRI_C.f[0]], [.55, TRI_C.f[1]], [1, TRI_C.f[2]]]); g.fill(inner);
+    // 물
+    g.save(); g.clip(inner);
+    if (level > 0) {
+      const top = 173 - Math.max(level, .045) * 150, c = KIND[kind], rg = g.createRadialGradient(50, 150, 0, 50, 150, 190);
+      rg.addColorStop(0, c[0]); rg.addColorStop(.55, c[1]); rg.addColorStop(1, c[2]);
+      g.beginPath(); g.moveTo(0, 200);
+      for (let k = 0; k <= 40; k++) g.lineTo(k * 5, top + Math.sin(k / 40 * Math.PI * 4 + t * 1.8) * 3);
+      g.lineTo(200, 200); g.closePath(); g.fillStyle = rg; g.fill();
+      g.beginPath(); for (let k = 0; k <= 40; k++) g.lineTo(k * 5, top + Math.sin(k / 40 * Math.PI * 4 + t * 1.8) * 3);
+      g.strokeStyle = "rgba(255,255,255,.55)"; g.lineWidth = 1.3; g.stroke();
+    }
+    g.fillStyle = lin(0, 0, 200, 0, [[0, "rgba(255,255,255,.55)"], [.25, "rgba(255,255,255,0)"]]); g.fillRect(0, 0, 200, 200);
+    g.restore();
+    // 선: 안쪽 테 · 튜브 · 윗면 광택 · 바깥 테
+    g.lineJoin = "round";
+    g.strokeStyle = "rgba(40,48,72,.22)"; g.lineWidth = 1.6; g.stroke(inner);
+    g.strokeStyle = "rgba(30,40,70,.14)"; g.lineWidth = 1.2; g.stroke(tubeS);
+    g.strokeStyle = "rgba(255,255,255,.95)"; g.lineWidth = 1.6; g.stroke(tube);
+    g.fillStyle = lin(0, 0, 140, 140, [[0, "rgba(255,255,255,.75)"], [.35, "rgba(255,255,255,0)"], [.8, "rgba(255,255,255,0)"], [1, "rgba(255,255,255,.35)"]]); g.fill(ring, "evenodd");
+    g.strokeStyle = "rgba(255,255,255,.9)"; g.lineWidth = 1.4; g.stroke(outer);
+    g.restore();
+    // 숫자: 왼쪽 변 = 수직, 아래 변 = 앞뒤 (앱과 같은 자리)
+    const ns = d * .13, ls = d * .056;
+    g.save(); g.textBaseline = "alphabetic";
+    g.font = F(800, ns); g.fillStyle = P.ink; g.textAlign = "right";
+    const vx = x + d * .07 - 6, vy = y + d * .6 + ns * .1; g.fillText(vText, vx, vy);
+    g.font = F(700, ls); g.fillStyle = P.ink3; g.fillText("수직", vx, vy + ls * 1.25);
+    g.font = F(800, ns); const fw = g.measureText(fText).width; g.font = F(700, ls); const lw = g.measureText("앞뒤").width;
+    const fx = x + d * .47 - (fw + 8 + lw) / 2, fy = y + d * .95 + 4 + ns * .92;
+    g.textAlign = "left"; g.font = F(800, ns); g.fillStyle = P.ink; g.fillText(fText, fx, fy);
+    g.font = F(700, ls); g.fillStyle = P.ink3; g.fillText("앞뒤", fx + fw + 8, fy);
+    g.restore();
+  }
   function star(g, cx, cy, s) {
     g.save(); g.translate(cx - s / 2, cy - s / 2); g.scale(s / 15, s / 15.1); g.translate(-4.5, -2.5);
     g.fill(new Path2D("M12 2.5c.6 4.6 2.9 6.9 7.5 7.5v.1c-4.6.6-6.9 2.9-7.5 7.5h-.1c-.6-4.6-2.9-6.9-7.5-7.5V10c4.6-.6 6.9-2.9 7.5-7.5z")); g.restore();
@@ -270,7 +319,7 @@ const videoMaker = (() => {
       c.v2.forEach(([k, v], i) => { g.fillStyle = P.ink3; g.font = F(700, 17); g.fillText(k, x + 20, y + 84 + i * 38); g.fillStyle = P.ink; g.font = F(800, 32); g.fillText(v, x + 64, y + 86 + i * 38); });
       g.fillStyle = P.ink3; g.font = F(400, 17); g.fillText(c.u, x + 20, y + 152);
     } else {
-      g.fillStyle = P.ink; g.font = F(800, 42); g.fillText(c.v, x + 20, y + 98);
+      g.fillStyle = P.ink; g.font = F(800, c.small ? 34 : 42); g.fillText(c.v, x + 20, y + 98);
       g.fillStyle = P.ink3; g.font = F(400, 18); g.fillText(c.u, x + 20, y + 126);
     }
     const lines = c.e2 || [c.e]; g.font = F(800, c.e2 ? 15 : 18);
@@ -316,6 +365,19 @@ const videoMaker = (() => {
     if (m.vibL && m.vibL.n) { gauges[1].b = [ev.vibL.s]; gauges[1].bl = ev.vibL.lv; gauges[1].bScale = 1.3; /* '좋음' 같은 등급 글자는 130% */ gauges[1].p = ev.vibL.line.replace(/ · 약 [\d.]+ Hz$/, ""); /* '약 7.5 Hz'는 뺌 */ }
     else { gauges[1].b = ["기록이 없어요."]; gauges[1].bl = -1; gauges[1].p = ""; }
     gauges[2].b = [ev.speed.t.replace(/요$/, "요.")]; gauges[2].bl = 0; gauges[2].p = "";
+    // 경사형 (2026-11-26 사용자 확정): 앱의 간단히와 같은 직각삼각형 게이지 (왼쪽 변 수직, 아래 변 앞뒤)
+    const I = m.incl, TRI = !!I;
+    if (I) {
+      const sn = Math.sin(I.theta * Math.PI / 180), along = I.speedAlong != null ? I.speedAlong : m.speedMax / sn;
+      const worse = [ev.vibV, ev.vibF].filter(x => x && x.lv >= 0).sort((a, b) => b.lv - a.lv)[0] || { lv: -1, s: "기록이 없어요." };
+      gauges[0].lbl = "가감속도"; gauges[0].lv = m.accPeak / sn / LEGEND_INC.acc; gauges[0].a = Math.max(m.accMax, m.decMax).toFixed(2); gauges[0].bv = Math.max(I.accMax, I.decMax).toFixed(2);
+      gauges[1].lbl = "흔들림"; gauges[1].lv = Math.max(m.vibV ? m.vibV.p98 : 0, I.vibF.p98) / LEGEND_INC.lat;
+      gauges[1].a = m.vibV && m.vibV.n ? m.vibV.p98.toFixed(1) : "—"; gauges[1].bv = I.vibF.n ? I.vibF.p98.toFixed(1) : "—";
+      gauges[1].b = [worse.s]; gauges[1].bl = worse.lv; gauges[1].bScale = 1.3;
+      gauges[1].p = [ev.vibV.line, ev.vibF && ev.vibF.line].filter(Boolean).map(l => l.replace(/ · 약 [\d.]+ Hz$/, "")).join(" · ");
+      gauges[2].lv = along / LEGEND_INC.spd; gauges[2].a = m.speedMax.toFixed(1); gauges[2].bv = I.speedMax.toFixed(1);
+      gauges[2].b = [`경사 방향 ${along.toFixed(1)} m/min`]; gauges[2].bl = -1;
+    }
     // 게이지: 크기는 예전(400)의 125% → 500, 사이 빈틈은 예전(가운데 간격 W/3 ≈ 774 − 400 = 374)의 1/2 → 187 (2026-11-25 사용자 확정)
     const G1 = { lbl: 76, lblF: 114, drop: 50, b: 64, bLh: 80, p: 44, pLh: 56, d: 500, gap: 500 + (W / 3 - 400) / 2 };
     G1.colW = G1.gap - 30;   // lbl: 자리 계산용, lblF: 실제 글자(1.5배)
@@ -325,7 +387,8 @@ const videoMaker = (() => {
     // 큰 글은 정해 둔 줄 그대로 (가속 줄·감속 줄), 작은 글만 옆 게이지 글과 겹치지 않을 폭에서 줄바꿈
     g.font = F(400, G1.p); gauges.forEach(q => { q.pl = q.p ? wrap(g, glue(q.p), G1.colW - 60) : []; });
     g.font = F(800, G1.b); gauges.forEach(q => { q.bl2 = q.b.slice(); });
-    const colH = q => G1.lbl + G1.sp + G1.d + 40 + q.bl2.length * G1.bLh * (q.bScale || 1) + (q.pl.length ? 12 + q.pl.length * G1.pLh : 0);
+    const TRI_D = 400, TRI_EX = TRI ? TRI_D * .95 + 4 + TRI_D * .13 + 20 - G1.d : 0;   // 삼각형: 한 변 400, 아래 숫자만큼 글을 내린다
+    const colH = q => G1.lbl + G1.sp + G1.d + TRI_EX + 40 + q.bl2.length * G1.bLh * (q.bScale || 1) + (q.pl.length ? 12 + q.pl.length * G1.pLh : 0);
     const G1top = Math.max(40, (H - Math.max(...gauges.map(colH))) / 2);
     // 자세히 배치 (1920 폭의 긴 쪽 위 좌표)
     const MX = 120, CW = W - 2 * MX;
@@ -345,18 +408,38 @@ const videoMaker = (() => {
       { l: "좌우 흔들림", ...(m.vibL && m.vibL.n ? { v: m.vibL.p98.toFixed(1), u: "gal", e: ev.vibL.s, lv: ev.vibL.lv } : { v: "—", u: "", e: NO, lv: -1 }) },
       { l: "출발 거칠기", ...gal(m.start, ev.start) }, { l: "가감속 울렁임", ...gal(m.wave, ev.wave) }, { l: "도착 거칠기", ...gal(m.arrive, ev.arrive) },
     ];
-    const CG = 14, cw = (CW - CG * 8) / 9, ch = 214, cy0 = ai.y + ai.h + 34;
+    // 경사형 (2026-11-26 사용자 확정): 앱의 자세히와 같이 머리글 + 경사형 지표 6개 + '기본 지표 · 수직 방향' + 9개, 그래프에 앞뒤 2개
+    let inclCards = [], heads = [];
+    if (I) {
+      const sn = Math.sin(I.theta * Math.PI / 180), along = I.speedAlong != null ? I.speedAlong : m.speedMax / sn, floors = Math.round(m.distance / 3);
+      const slope = th => (th < 25 ? "완만한 편이에요" : th < 40 ? "보통 기울기예요" : "가파른 편이에요");
+      inclCards = [
+        { l: "경사도", v: I.changes.length ? [I.theta, ...I.changes.map(c => c.to)].map(v => v + "°").join("→") : `${I.theta}°`, small: I.changes.length > 0, u: "", e: I.changes.length ? `운행 중 ${I.changes.length}번 바뀌었어요` : slope(I.theta), lv: -1 },
+        { l: "앞뒤 가감속도", v2: [["가속", I.accMax.toFixed(2)], ["감속", I.decMax.toFixed(2)]], u: "m/s²", e2: [`가속 ${ev.fa.a}`, `감속 ${ev.fa.d}`], lv: -1 },
+        { l: "앞뒤 속력", v: I.speedMax.toFixed(1), u: "m/min", e: `경사 방향 ${along.toFixed(1)} m/min`, lv: -1 },
+        { l: "앞뒤 흔들림", ...(I.vibF.n ? { v: I.vibF.p98.toFixed(1), u: "gal", e: ev.vibF.s, lv: ev.vibF.lv } : { v: "—", u: "", e: NO, lv: -1 }) },
+        { l: "수직 이동거리", v: I.distV.toFixed(1), u: "m", e: floors >= 1 ? `건물 약 ${floors}층 높이` : "거의 움직이지 않았어요", lv: -1 },
+        { l: "앞뒤 이동거리", v: I.distF.toFixed(1), u: "m", e: `경사 방향 ${I.distAlong.toFixed(1)} m`, lv: -1 },
+      ];
+      const ang = I.changes.length ? `경사 ${[I.theta, ...I.changes.map(c => c.to)].map(v => v + "°").join(" → ")}` : `경사 ${I.theta}°`;
+      heads = [["경사형 엘리베이터", `${ang} · 수직 ${I.distV.toFixed(1)} m · 앞뒤 ${I.distF.toFixed(1)} m`], ["기본 지표", "수직 방향"]];
+    }
+    const CK = I ? .72 : 1, HH = 46;                       // 경사형: 카드 두 줄이라 72%로 줄여 그린다
+    const CG = 14, cw = (CW - CG * 8) / 9, ch = 214 * CK, hy1 = ai.y + ai.h + 26, iy0 = hy1 + HH, hy2 = iy0 + ch + 18;
+    const cy0 = I ? hy2 + HH : ai.y + ai.h + 34;
+    const allCards = inclCards.map((c, i) => ({ c, x: MX + i * (cw + CG), y: iy0 })).concat(cards.map((c, i) => ({ c, x: MX + i * (cw + CG), y: cy0 })));
     // 그래프 4개 (속력 제외, 사용자 확정): 그래프 그리기는 앱의 Chart를 그대로 쓴다 (화면 밖 캔버스)
-    const keys = ["acc", "jerk", "vibV", "vibL"].filter(k => k !== "vibL" || (m.vibL && m.vibL.n));
-    const GG = 26, gw = (CW - GG) / 2, gy0 = cy0 + ch + 30, gh = Math.floor((H - 36 - gy0 - GG) / 2);
+    const keys = ["acc", "jerk", "vibV", "vibL"].filter(k => k !== "vibL" || (m.vibL && m.vibL.n)).concat(I ? ["fa", "vibF"] : []);
+    const GC = I ? 3 : 2;                                  // 경사형: 그래프 6개를 3열로
+    const GG = 26, gw = (CW - GG * (GC - 1)) / GC, gy0 = cy0 + ch + 30, gh = Math.floor((H - 36 - gy0 - GG) / 2);
     // 2026-11-25: 스크롤 없이 카드 아래 한 화면에. 폭은 카드 줄에 맞춰 좌우로 길게, 높이만 남은 자리에 맞춘다
     const GK = 1, gx0 = MX;
     const host = document.createElement("div"); host.style.cssText = `position:fixed;left:-99999px;top:0;width:${gw - 20}px;`; document.body.appendChild(host);
     const charts4 = keys.map(k => {
-      const s = SERIES.find(x => x.key === k), c = document.createElement("canvas");
+      const s = SERIES.find(x => x.key === k) || SERIES_INC.find(x => x.key === k), c = document.createElement("canvas");
       c.style.cssText = `display:block;width:${gw - 20}px;height:${gh - 74}px`; host.appendChild(c);
-      const comment = { acc: ev.acc.s, jerk: ev.jerk.s, vibV: ev.vibV.s, vibL: ev.vibL ? ev.vibL.s : "" }[k];
-      const chObj = new Chart(c, { values: S[k], rate: rec.rate, color: s.color, half: s.half, dec: s.dec, unit: s.unit, animate: false, hiRes: true, marks: true, spans: (k === "vibV" || k === "vibL") && m.cruise.length ? m.cruise : null, pauses: m.pauses });
+      const comment = { acc: ev.acc.s, jerk: ev.jerk.s, vibV: ev.vibV.s, vibL: ev.vibL ? ev.vibL.s : "", fa: I ? (ev.fa.a === ev.fa.d ? ev.fa.a : `${ev.fa.a}·${ev.fa.d}`) : "", vibF: ev.vibF ? ev.vibF.s : "" }[k];
+      const chObj = new Chart(c, { values: S[k], rate: rec.rate, color: s.color, half: s.half, dec: s.dec, unit: s.unit, animate: false, hiRes: true, marks: true, spans: (k === "vibV" || k === "vibL" || k === "vibF") && m.cruise.length ? m.cruise : null, pauses: m.pauses });
       return { s, c, ch: chObj, comment };
     });
 
@@ -364,7 +447,7 @@ const videoMaker = (() => {
     // 2026-11-25: 게이지·AI 평가는 움직임이 멎은 뒤 1초만 보여 주고, 그래프는 카드와 함께 한 화면에 차례로 등장
     //  게이지는 약 1.8초, AI 평가 상자는 등장 후 약 0.6초에 멎는다
     const T = { gIn: 0, gOut: 2.8, aiIn: 3.1, zoom: 4.7, zoomEnd: 5.9, cardsIn: 5.3, cardGap: .07, chartGap: .1 };
-    T.chartsIn = T.cardsIn + cards.length * T.cardGap;                // 카드 9개에 이어 그래프 4개가 차례로 (한 물결)
+    T.chartsIn = T.cardsIn + allCards.length * T.cardGap;                // 카드 9개에 이어 그래프 4개가 차례로 (한 물결)
     const drawFrame = t => {
       g.setTransform(U, 0, 0, U, 0, 0); g.globalAlpha = 1; g.filter = "none";
       background(g, P);
@@ -379,13 +462,14 @@ const videoMaker = (() => {
           g.save(); g.globalAlpha *= kA; g.translate(x, y); g.scale(.7 + .3 * kIn, .7 + .3 * kIn); g.translate(-x, -y);
           g.fillStyle = P.ink2; g.font = F(800, G1.lblF); g.textAlign = "center"; g.textBaseline = "alphabetic"; g.fillText(q.lbl, x, yL);
           const lv = clamp(q.lv, q.a === "—" ? 0 : .03, 1) * glide(seg(t, .5 + i * .15, 2.1 + i * .15));
-          sphere(g, P, x, y, d, q.k, lv, q.a, q.bv, q.u, t);
+          if (TRI) triGauge(g, P, x - TRI_D / 2 + TRI_D * .1, y - d / 2, TRI_D, q.k, lv, q.a, q.bv, t);
+          else sphere(g, P, x, y, d, q.k, lv, q.a, q.bv, q.u, t);
           g.restore();
           // 아래 글: 게이지보다 살짝 늦게 통 올라옴
           const kT = spring(seg(t, t0 + .25, t0 + 1.15)), kTA = out(seg(t, t0 + .25, t0 + .6));
           g.save(); g.globalAlpha *= kTA; g.translate(0, (1 - kT) * 46); g.textAlign = "center";
           const bs = q.bScale || 1;
-          let yy = y + d / 2 + 40 + G1.b * bs * .82;
+          let yy = y + d / 2 + TRI_EX + 40 + G1.b * bs * .82;
           g.font = F(800, G1.b * bs); g.fillStyle = q.bl >= 0 ? (P.dark ? LV.dark : LV.light)[q.bl] : P.ink;
           q.bl2.forEach(l => { g.fillText(l, x, yy); yy += G1.bLh * bs; });
           g.font = F(400, G1.p); g.fillStyle = P.ink2; yy += 12 - G1.bLh * bs + G1.pLh;
@@ -415,15 +499,26 @@ const videoMaker = (() => {
           if (zp > 0) { g.globalAlpha = fade * aiK * zp; aiContent(g, P3, R.x, R.y, t, LP, kz); }
           g.restore(); g.restore();
         }
-        cards.forEach((c, i) => {
+        // 경사형 머리글 (알약 + 설명): 앱의 .incl-sec
+        heads.forEach(([tag, sub], i) => {
+          const t0 = T.cardsIn + (i ? inclCards.length * T.cardGap : -T.cardGap), k = out(seg(t, t0, t0 + .3)); if (k <= 0) return;
+          const hy = i ? hy2 : hy1;
+          g.save(); g.globalAlpha *= k; g.textBaseline = "middle"; g.font = F(800, 21);
+          const tw = g.measureText(tag).width + 36; panel(g, P3, MX + 4, hy, tw, 36, 18);
+          g.fillStyle = P3.ink; g.textAlign = "left"; g.fillText(tag, MX + 22, hy + 19);
+          g.font = F(700, 21); g.fillStyle = P3.ink3; g.fillText(sub, MX + tw + 20, hy + 19); g.restore();
+        });
+        allCards.forEach(({ c, x: cx, y: cy }, i) => {
           const t0 = T.cardsIn + i * T.cardGap, k = out(seg(t, t0, t0 + .3)), kS = spring(seg(t, t0, t0 + .85)); if (k <= 0) return;
-          const x = MX + i * (cw + CG) + cw / 2, y = cy0 + ch / 2;
+          const x = cx + cw / 2, y = cy + ch / 2;
           g.save(); g.globalAlpha *= k; g.translate(x, y + (1 - kS) * 60); g.scale(.85 + .15 * kS, .85 + .15 * kS); g.translate(-x, -y);
-          card(g, P3, c, MX + i * (cw + CG), cy0, cw, ch); g.restore();
+          if (CK !== 1) { g.translate(cx, cy); g.scale(CK, CK); card(g, P3, c, 0, 0, cw / CK, 214); }
+          else card(g, P3, c, cx, cy, cw, ch);
+          g.restore();
         });
         charts4.forEach((q, i) => {
           const t0 = T.chartsIn + i * T.chartGap, k = out(seg(t, t0, t0 + .3)), kS = spring(seg(t, t0, t0 + .9)); if (k <= 0) return;
-          const x = (i % 2) * (gw + GG), y = Math.floor(i / 2) * (gh + GG);
+          const x = (i % GC) * (gw + GG), y = Math.floor(i / GC) * (gh + GG);
           g.save(); g.translate(gx0, gy0); g.scale(GK, GK); g.globalAlpha *= k; g.translate(x + gw / 2, y + gh / 2 + (1 - kS) * 70); g.scale(.9 + .1 * kS, .9 + .1 * kS); g.translate(-x - gw / 2, -y - gh / 2);
           panel(g, P3, x, y, gw, gh, 30);
           g.textBaseline = "alphabetic"; g.textAlign = "left"; g.fillStyle = P3.ink; g.font = F(800, 26); g.fillText(q.s.title, x + 24, y + 48);
@@ -439,7 +534,7 @@ const videoMaker = (() => {
 
     // 모션 블러 (2026-11-25 사용자 요청): 움직이는 구간은 프레임 반 동안(셔터 180°) 4번 그려 평균, 멈춘 구간은 한 번
     const fcv = document.createElement("canvas"); fcv.width = OW; fcv.height = OH; const fg = fcv.getContext("2d", { willReadFrequently: true });
-    const MOVING = [[.1, 2.4], [T.gOut - .05, T.aiIn + 1.1], [T.zoom - .05, Math.max(T.zoomEnd + .9, T.chartsIn + 3 * T.chartGap + 1.3)]];
+    const MOVING = [[.1, 2.4], [T.gOut - .05, T.aiIn + 1.1], [T.zoom - .05, Math.max(T.zoomEnd + .9, T.chartsIn + (charts4.length - 1) * T.chartGap + 1.3)]];
     const renderFrame = t => {
       const K = MOVING.some(([a, b]) => t >= a && t <= b) ? 4 : 1;
       fg.globalCompositeOperation = "copy"; fg.globalAlpha = 1;

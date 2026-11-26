@@ -4,7 +4,7 @@
 /* ───────── 상수 ───────── */
 const FS = Core.FS;
 /* 앱 버전 (2026-11-25 사용자 확정): 0.큰 기능 묶음.고친 횟수 — 웹 앱 확정 때 1.0.0, 안드로이드 앱 때 2.0.0 */
-const APP_VERSION = "0.13.1";
+const APP_VERSION = "0.13.2";
 const LEGEND = { acc: 1.5, lat: 30, latA: 20, spd: 600 };
 const LEGEND_INC = { acc: 0.6, lat: 20, spd: 90 };   // 경사형 게이지 범례 (2026-11-26): 경사형은 60 m/min 이하라 속력 90, 가감속·흔들림은 측정 자료 기준   // 물 높이 범례 (화면에 표시하지 않음). lat: 실시간 p-p, latA: 기록의 |98% 피크|
 const CUT = Math.round(Core.P.CUT_SEC * FS);
@@ -634,7 +634,7 @@ const ctl = {
     try { navigator.vibrate && navigator.vibrate(30); } catch (e) { /* 무시 */ }
     home.render();
   },
-  /** 리셋 (2026-11-25): 엘리베이터가 서 있을 때 0.3초 이상 눌렀다 떼면, 지금까지 잰 것을 버리고 0.5초 보정 뒤 처음부터 다시 잰다 */
+  /** 리셋 (2026-11-25, 2026-11-26 언제나): 0.3초 이상 눌렀다 떼면, 지금까지 잰 것을 버리고 1초 보정 뒤 처음부터 다시 잰다 (경사형 판정도 처음부터) */
   reset() {
     if (this.state !== "measure" || this.phase !== "run") return;
     this.vert = []; this.lat = []; this.lon = []; this.segs = [0]; this.distOff = 0; this.inclReset(true);
@@ -756,9 +756,9 @@ const home = {
     } else if (kind === "live-incl") {
       // 경사형 (2026-11-26 사용자 확정): 게이지를 모두 지우고 직각삼각형 게이지 3개. 세로 화면은 위아래로, 가로 화면은 옆으로 나란히
       const wide = isWide();
-      const avail = innerHeight - 60 - 70 - 110 - 3 * 58;
+      const avail = innerHeight - 60 - 70 - 110 - 3 * 76;
       const size = wide ? Math.round(clamp(Math.min(innerHeight - 300, (innerWidth - 220) / 3.9), 130, 300)) : Math.round(clamp(avail / 3, 96, 170));
-      body.innerHTML = `<div class="incl ${wide ? "row" : ""}"><div class="incl-msg" id="inclMsg"><div class="glass"><h3></h3><p></p><span class="pill"></span></div></div>
+      body.innerHTML = `<div class="incl ${wide ? "row" : ""}"><div class="incl-msg" id="inclMsg"><div class="glass"><h3></h3><p></p><span class="pill"></span></div></div><span class="incl-ang glass" id="inclAng"></span>
         <div class="tris">${[["acc", "가감속도", "m/s²"], ["lat", "흔들림", "gal"], ["spd", "속력", "m/min"]].map(([k, t, u], i) =>
           `<div class="item fade-in" style="animation-delay:${0.1 + i * 0.1}s"><div class="lbl">${t}<small>${u}</small></div><div class="g" id="tg-${k}"></div></div>`).join("")}</div></div>`;
       this.tris = {}; this.liveAt = {};
@@ -766,7 +766,7 @@ const home = {
       this.tris.lat.vals("0.0", "0.0"); this.tris.spd.vals("0.0", "0.0");
       this.inclMsg();
     } else if (kind === "live-simple") {
-      const avail = innerHeight - 60 - 70 - 110 - 3 * 30;
+      const avail = innerHeight - 60 - 70 - 110 - 3 * 44;
       // 가로 화면: 세 게이지를 옆으로 나란히, 화면 높이에 맞춰 크게
       const size = isWide() ? Math.round(clamp(Math.min((innerHeight - 260) * 0.95, (innerWidth - 160) / 3.6), 150, 340)) : Math.round(clamp(avail / 3, 104, 176));
       body.innerHTML = `<div class="triple">${[["acc", "가감속도"], ["lat", "좌우 흔들림"], ["spd", "현재 속력"]].map(([k, t], i) =>
@@ -786,10 +786,11 @@ const home = {
       this.liveCharts.forEach(ch => this.liveIO.observe(ch.c));
     }
   },
-  /** 경사형 알림: '경사형 엘리베이터네요.' 또는 '경사각이 변화했어요.' + 알약. 3초 뒤 접힌다 (2026-11-26 사용자 확정) */
+  /** 경사형 알림: '경사형 엘리베이터네요.' 또는 '경사각이 변화했어요.' + 알약. 1초 뒤 사라진다 (2026-11-26 사용자 확정) */
   inclMsg() {
     const box = $("#inclMsg"), I = ctl.incl; if (!box || !I || !I.msg) return;
-    const left = 3000 - (performance.now() - I.msg.at);
+    const ang = $("#inclAng"); if (ang) ang.textContent = `경사 ${I.deg}°`;      // 가로 화면: 경사각 알약은 계속 보인다 (2026-11-26)
+    const left = 1000 - (performance.now() - I.msg.at);                          // 알림은 1초 (2026-11-26 사용자 확정)
     clearTimeout(this.msgT);
     if (left <= 0) { box.classList.add("hide"); return; }
     const ch = I.msg.kind === "change";
@@ -838,13 +839,13 @@ const home = {
       // 일시정지 → 측정 재개 (0.3초 이상 길게 눌렀다 떼기)
       const calib = ph === "calib";
       box.innerHTML = `<div class="pause-note glass" id="pNote">${calib ? "센서를 보정하고 있어요.<br>휴대폰을 그대로 두세요."
-          : "측정 재개 버튼을 <b>0.3초 이상</b> 길게 눌렀다 떼면<br>0.5초간 센서를 보정하고 바로 이어서 측정해요."}</div>
+          : "측정 재개 버튼을 <b>0.3초 이상</b> 길게 눌렀다 떼면<br>1초간 센서를 보정하고 바로 이어서 측정해요."}</div>
         <div class="toggle-wrap act-row"><button class="pill-btn primary hold ${calib ? "calib" : ""}" id="bResume" ${calib ? "disabled" : ""}><i class="fill"></i>${ICON.play}<span>${calib ? "보정 중" : "측정 재개"}</span></button>${stop}</div>`;
       if (!calib) this.bindHold($("#bResume"), () => ctl.recalibrate(), () => {
         const n = $("#pNote"); n.classList.remove("nudge"); void n.offsetWidth; n.classList.add("nudge"); });
     } else {
       const pause = measuring ? `<button class="pill-btn round hold" id="bPause" aria-label="일시정지 (0.3초 이상 길게 누르기)" title="0.3초 이상 길게 눌렀다 떼면 일시정지"><i class="fill"></i>${ICON.pause}</button>` : "";
-      const reset = measuring ? `<button class="pill-btn round hold" id="bReset" aria-label="리셋 (정지 중 0.3초 이상 누르고 떼기)" title="엘리베이터가 서 있을 때 0.3초 이상 누르고 떼면 리셋"><i class="fill"></i>${ICON.reset}</button>` : "";
+      const reset = measuring ? `<button class="pill-btn round hold" id="bReset" aria-label="리셋 (0.3초 이상 누르고 떼기)" title="0.3초 이상 누르고 떼면 리셋"><i class="fill"></i>${ICON.reset}</button>` : "";
       box.innerHTML = `<div class="toggle-wrap act-row">${tog}${reset}${pause}${stop}${cancel}</div>`;
     }
     if ($("#bTog")) $("#bTog").onclick = () => { this.detail = !this.detail; this.render(); };
@@ -855,7 +856,7 @@ const home = {
         () => { at = ctl.vert ? ctl.vert.length : null; });
     }
     if ($("#bReset")) this.bindHold($("#bReset"),
-      () => { if (ctl.an && ctl.an.still) ctl.reset(); else toast("엘리베이터가 정지하면 리셋할 수 있어요."); },   // 손을 뗄 때 서 있어야
+      () => ctl.reset(),   // 2026-11-26: 리셋은 언제나 (예전: 엘리베이터가 서 있을 때만). 경사형 게이지도 일반 게이지로 돌아간다
       () => toast("0.3초 이상 누르고 떼면 리셋돼요."));
     if ($("#bStop")) $("#bStop").onclick = () => ctl.stop("manual");
     if ($("#bCancel")) $("#bCancel").onclick = () => { ctl.state = "idle"; ctl.progress = 0; ctl.stopDemo(); home.render(); };
@@ -1293,7 +1294,7 @@ const detail = {
       const sn = Math.sin(I.theta * Math.PI / 180), along = I.speedAlong != null ? I.speedAlong : m.speedMax / sn;
       const slope = t => (t < 25 ? "완만한 편이에요" : t < 40 ? "보통 기울기예요" : "가파른 편이에요");
       const ic = [
-        { l: "경사도", v: I.changes.length ? `${I.theta}→${I.thetaEnd}` : String(I.theta), u: "°", e: I.changes.length ? `운행 중 ${I.changes.length}번 바뀌었어요` : slope(I.theta), lv: -1 },
+        { l: "경사도", v: I.changes.length ? `<span class="shrink">${[I.theta, ...I.changes.map(c => c.to)].map(v => v + "°").join("→")}</span>` : `${I.theta}°`, u: "", e: I.changes.length ? `운행 중 ${I.changes.length}번 바뀌었어요` : slope(I.theta), lv: -1 },
         { l: "앞뒤 가감속도", v2: [["가속", I.accMax.toFixed(2)], ["감속", I.decMax.toFixed(2)]], u: "m/s²", e2: [`가속 ${ev.fa.a}`, `감속 ${ev.fa.d}`], lv: -1 },
         { l: "앞뒤 속력", v: I.speedMax.toFixed(1), u: "m/min", e: `경사 방향 ${along.toFixed(1)} m/min`, lv: -1 },
         { l: "앞뒤 흔들림", ...(I.vibF.n ? { v: I.vibF.p98.toFixed(1), u: "gal", e: ev.vibF.s, lv: ev.vibF.lv } : { v: "—", u: "", e: NO, lv: -1 }) },
