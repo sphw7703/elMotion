@@ -175,8 +175,9 @@ button:focus-visible, [tabindex]:focus-visible, input:focus-visible { outline: 2
 .incl-rows .g { padding: 6px 30px 30px 46px; }
 .incl-rows .ev p { white-space: pre-line; }
 .incl-rows #ds-spd { padding-right: 64px; }
-.incl-ang { display: none; }
-:root.wide .incl-ang { display: inline-flex; align-self: center; margin: 0 0 18px; padding: 8px 20px; border-radius: 999px; font-size: 22px; font-weight: 800; color: var(--ink); font-variant-numeric: tabular-nums; }
+/* 경사 알약: '측정 중' 알약 바로 옆, 같은 디자인 (2026-11-26) */
+#livePill:has(+ .incl-pill:not([hidden])) { margin-right: 0; }
+.live-pill.incl-pill { padding: 0 14px; }
 .incl .tris { display: flex; flex-direction: column; align-items: center; gap: 6px; width: 100%; }
 .incl .item { display: flex; flex-direction: column; align-items: center; }
 .incl .item .lbl { font-size: 26px; font-weight: 800; color: var(--ink-2); margin-bottom: 4px; letter-spacing: -.02em; }   /* 2026-11-26: 2배 */
@@ -668,7 +669,7 @@ body.selecting #recList { padding-bottom: 150px; }
       <!-- 홈 -->
       <section class="page" id="pHome" aria-label="측정">
         <div class="top home-top">
-          <span class="live-pill glass" id="livePill" hidden><i></i><span id="liveTime">0:00</span></span>
+          <span class="live-pill glass" id="livePill" hidden><i></i><span id="liveTime">0:00</span></span><span class="live-pill glass incl-pill" id="inclPill" hidden></span>
           <button class="round-btn pop" id="btnHelp" aria-label="도움말"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M9.2 9.2a2.9 2.9 0 115 2c-.9.8-2.2 1.4-2.2 2.9"/><circle cx="12" cy="17.6" r=".6" fill="currentColor"/></svg></button>
         </div>
         <div class="home-body" id="homeBody"></div>

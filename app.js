@@ -4,7 +4,7 @@
 /* ───────── 상수 ───────── */
 const FS = Core.FS;
 /* 앱 버전 (2026-11-25 사용자 확정): 0.큰 기능 묶음.고친 횟수 — 웹 앱 확정 때 1.0.0, 안드로이드 앱 때 2.0.0 */
-const APP_VERSION = "0.13.5";
+const APP_VERSION = "0.13.6";
 const LEGEND = { acc: 1.5, lat: 30, latA: 20, spd: 600 };
 const LEGEND_INC = { acc: 0.6, lat: 20, spd: 90 };   // 경사형 게이지 범례 (2026-11-26): 경사형은 60 m/min 이하라 속력 90, 가감속·흔들림은 측정 자료 기준   // 물 높이 범례 (화면에 표시하지 않음). lat: 실시간 p-p, latA: 기록의 |98% 피크|
 const CUT = Math.round(Core.P.CUT_SEC * FS);
@@ -716,6 +716,7 @@ const home = {
     const st = ctl.state, measuring = st === "measure";
     const want = measuring ? (this.detail ? "live-detail" : ctl.incl ? "live-incl" : "live-simple") : "single";
     $("#livePill").hidden = !measuring;
+    const ip = $("#inclPill"); ip.hidden = !(measuring && ctl.incl); if (!ip.hidden) ip.textContent = `경사 ${ctl.incl.deg}°`;
     const held = measuring && ctl.phase !== "run";
     $("#livePill").classList.toggle("paused", held);
     if (want !== this.layout) {
@@ -757,7 +758,7 @@ const home = {
       const old = wide ? clamp(Math.min(innerHeight - 300, (innerWidth - 220) / 3.9), 130, 300) : clamp((innerHeight - 60 - 70 - 110 - 3 * 76) / 3, 96, 170);
       const fit = wide ? Math.min((innerWidth - 60) / 3.97, innerHeight - 380) : Math.min((innerHeight - 250 - 3 * 34) / 3, innerWidth - 24 - 112 - 46);
       const size = Math.round(Math.max(90, Math.min(old * 1.3, fit)));
-      body.innerHTML = `<div class="incl ${wide ? "row" : ""}" style="--d:${size}px"><div class="incl-msg" id="inclMsg"><div class="glass"><h3></h3><p></p><span class="pill"></span></div></div><span class="incl-ang glass" id="inclAng"></span>
+      body.innerHTML = `<div class="incl ${wide ? "row" : ""}" style="--d:${size}px"><div class="incl-msg" id="inclMsg"><div class="glass"><h3></h3><p></p><span class="pill"></span></div></div>
         <div class="tris">${[["acc", "가감속도", "m/s²"], ["lat", "흔들림", "gal"], ["spd", "속력", "m/min"]].map(([k, t, u], i) =>
           `<div class="item fade-in" style="animation-delay:${0.1 + i * 0.1}s"><div class="lbl">${t}</div><div class="g" id="tg-${k}"></div></div>`).join("")}</div></div>`;
       this.tris = {}; this.liveAt = {};
@@ -789,7 +790,7 @@ const home = {
   /** 경사형 알림: '경사형 엘리베이터네요.' 또는 '경사각이 변화했어요.' + 알약. 1초 뒤 사라진다 (2026-11-26 사용자 확정) */
   inclMsg() {
     const box = $("#inclMsg"), I = ctl.incl; if (!box || !I || !I.msg) return;
-    const ang = $("#inclAng"); if (ang) ang.textContent = `경사 ${I.deg}°`;      // 가로 화면: 경사각 알약은 계속 보인다 (2026-11-26)
+    $("#inclPill").textContent = `경사 ${I.deg}°`;                              // '측정 중' 옆 경사 알약은 계속 보인다 (2026-11-26)
     const left = 1000 - (performance.now() - I.msg.at);                          // 알림은 1초 (2026-11-26 사용자 확정)
     clearTimeout(this.msgT);
     if (left <= 0) { box.classList.add("hide"); return; }
