@@ -152,6 +152,7 @@ button:focus-visible, [tabindex]:focus-visible, input:focus-visible { outline: 2
 /* 속력: 빗변 바깥 (경사 방향) */
 .tri-s { left: calc(var(--d) * .58); top: calc(var(--d) * .47); transform: translateY(-50%); flex-direction: column; align-items: flex-start; gap: 0; }
 .tri-v b, .tri-h b, .tri-s b { font-weight: 800; font-size: clamp(15px, calc(var(--d) * .13), 34px); font-variant-numeric: tabular-nums; letter-spacing: -.02em; }
+.tri-s i { margin-left: calc(var(--d) * .1); }   /* '경사 방향'만 빗변에서 떨어지게 오른쪽으로 (2026-11-26) */
 .tri-v i, .tri-h i, .tri-s i { font-style: normal; font-weight: 700; font-size: clamp(10px, calc(var(--d) * .06), 15px); color: var(--ink-3); }
 /* 단위: 오른쪽 아래에 작게 */
 .tri-u { position: absolute; left: calc(var(--d) * .95 + 2px); top: calc(var(--d) * .9); font-weight: 700; font-size: clamp(10px, calc(var(--d) * .065), 16px); color: var(--ink-3); white-space: nowrap; }

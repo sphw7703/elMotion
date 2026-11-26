@@ -195,7 +195,7 @@ const videoMaker = (() => {
     if (along != null) {
       const sx = x + d * .58, sy = y + d * .47 + ns * .1;
       g.font = F(800, ns); g.fillStyle = P.ink; g.fillText(along, sx, sy);
-      g.font = F(700, ls); g.fillStyle = P.ink3; g.fillText("경사 방향", sx, sy + ls * 1.25);
+      g.font = F(700, ls); g.fillStyle = P.ink3; g.fillText("경사 방향", sx + d * .1, sy + ls * 1.25);
     }
     if (unit) { g.font = F(700, us); g.fillStyle = P.ink3; g.fillText(unit, x + d * .95 + 2, y + d * .9 + us); }
     g.restore();
