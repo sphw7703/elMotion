@@ -840,6 +840,65 @@
     return { series: S, m, spans: zupt.map(([a, r]) => [a, r]) };
   }
 
+  /** 경사 방향 속력 (m/s, + = 오르막). 가감속 펄스(연직 0.5 Hz 저역이 0.025 m/s² 넘게 1초 이상)마다
+      경사 방향 가속도 = 연직·sinθ + 전후·cosθ (펄스 앞뒤 1.5초를 잇는 직선을 기준으로 뺀 값)를 쌓고, 펄스 사이는 정속으로 둔다.
+      멈춤(속력이 그 운행 최고의 20% 아래로 떨어짐)마다 남은 속력을 그 운행의 펄스들에 나눠 0으로 맞춘다 (ZUPT).
+      펄스를 못 찾으면 null */
+  function inclineSpeed(z, x, th, fs) {
+    const n = z.length; if (n < 3 * fs) return null;
+    const zl = zp(z, 0.5, fs), med = median(zl), on = INC.Z_ON, w = Math.round(1.5 * fs);
+    // 펄스 찾기 (같은 부호로 1초 안에 이어지면 합침)
+    const ps = [];
+    for (let i = 0; i < n;) {
+      const d = zl[i] - med;
+      if (Math.abs(d) <= on) { i++; continue; }
+      let j = i; const sg = Math.sign(d);
+      while (j < n && Math.abs(zl[j] - med) > on && Math.sign(zl[j] - med) === sg) j++;
+      const last = ps[ps.length - 1];
+      if (last && last.sg === sg && i - last.b < fs) last.b = j; else ps.push({ a: i, b: j, sg });
+      i = j;
+    }
+    // 앞뒤 1.5초씩 넓힌 창. 겹치면 하나로
+    const win = [];
+    for (const p of ps.filter(p => p.b - p.a >= fs)) {
+      const a = Math.max(0, p.a - w), b = Math.min(n, p.b + w), last = win[win.length - 1];
+      if (last && a <= last.b) last.b = b; else win.push({ a, b });
+    }
+    if (!win.length) return null;
+    const mean = (q, a, b) => { let t = 0; for (let i = a; i < b; i++) t += q[i]; return b > a ? t / (b - a) : 0; };
+    const acc = new Float64Array(n);
+    for (const W of win) {
+      const a0 = Math.max(0, W.a - fs), b1 = Math.min(n, W.b + fs);
+      const z0 = mean(z, a0, W.a || 1), z1 = mean(z, W.b, b1 || W.b + 1), x0 = mean(x, a0, W.a || 1), x1 = mean(x, W.b, b1 || W.b + 1), L = W.b - W.a;
+      for (let i = W.a; i < W.b; i++) {
+        const f = (i - W.a) / L, r = th[i] * Math.PI / 180;
+        acc[i] = (z[i] - (z0 + (z1 - z0) * f)) * Math.sin(r) + (x[i] - (x0 + (x1 - x0) * f)) * Math.cos(r);
+      }
+      W.imp = 0; for (let i = W.a; i < W.b; i++) W.imp += acc[i] / fs;
+    }
+    // 운행마다 ZUPT: 창별 속력 변화를 쌓다가 운행 최고의 20% 아래로 떨어지면 멈춤 → 남은 값을 그 운행 창들에 |변화| 비례로 나눠 뺀다
+    let v = 0, peak = 0, trip = [];
+    const fix = () => {
+      const tot = trip.reduce((t, W) => t + Math.abs(W.imp), 0);
+      if (tot > 0) for (const W of trip) W.corr = -v * Math.abs(W.imp) / tot;
+      trip = []; v = 0; peak = 0;
+    };
+    for (const W of win) {
+      W.corr = 0; trip.push(W); v += W.imp; peak = Math.max(peak, Math.abs(v));
+      if (peak > 0.05 && Math.abs(v) < 0.2 * peak) fix();
+    }
+    if (trip.length && peak > 0 && Math.abs(v) < 0.35 * peak) fix();   // 기록 끝: 멈춘 것으로 보이면
+    // 속력 곡선
+    const out = new Float32Array(n); let cur = 0, k = 0;
+    for (let i = 0; i < n; i++) {
+      while (k < win.length && i >= win[k].b) k++;
+      const W = win[k];
+      if (W && i >= W.a) { cur += acc[i] / fs + W.corr / (W.b - W.a); }
+      out[i] = cur;
+    }
+    return out;
+  }
+
   /** 기록에서 경사형 엘리베이터 찾기 → m.incl 과 앞뒤 그래프(S.fa, S.vibF, S.speedF, S.distF).
       경사형이면 좌우 흔들림은 앞뒤에 직각인 수평 방향으로 다시 잰다. */
   function inclineInto({ vert, lat, lon, S, mot, moving, bounds, levMask, vMask, fs, m }) {
@@ -871,8 +930,30 @@
         th[i] = curT; u1[i] = cu[0]; u2[i] = cu[1];
       }
     }
+    // 경사 방향 속력 (2026-11-26, 실측 경사형 8회로 정함): 가감속 펄스마다 경사 방향으로 투영한 가속도를 쌓고, 펄스 사이는 정속.
+    //   상하만 적분하면 경사형은 신호가 작고(상하는 전후의 1/2.6~1/3.5) 영점이 조금만 어긋나도 속력이 크게 틀어진다
+    const vs = new Float32Array(n);
+    let kinOk = false;
+    for (const g of segInfo) {
+      const h = new Float32Array(g.e - g.s);
+      for (let i = g.s; i < g.e; i++) h[i - g.s] = (lat[i] - g.b[0]) * u1[i] + (lon[i] - g.b[1]) * u2[i];
+      const v = inclineSpeed(vert.subarray(g.s, g.e), h, th.subarray(g.s, g.e), fs);
+      if (v) { vs.set(v, g.s); kinOk = true; }
+      else for (let i = g.s; i < g.e; i++) vs[i] = S.speed[i] / 60 / Math.sin(th[i] * Math.PI / 180);
+    }
+    if (kinOk) {
+      // 연직 속력·거리도 경사 방향 속력으로 다시 (그래프 · 최고 속력 · 주행 거리)
+      let d = 0, up = 0, dn = 0;
+      for (let i = 0; i < n; i++) {
+        const sv = vs[i] * Math.sin(th[i] * Math.PI / 180) * 60;
+        S.speed[i] = sv; d += Math.abs(sv) / 60 / fs; S.dist[i] = d;
+        if (sv > up) up = sv; if (-sv > dn) dn = -sv;
+      }
+      m.speedUp = up; m.speedDown = dn; m.speedMax = Math.max(up, dn); m.speedPeak = m.speedMax; m.distance = d;
+      m.speedShort = false;
+    }
     const fa = new Float32Array(n), vibF = new Float32Array(n), vibL = new Float32Array(n), speedF = new Float32Array(n), distF = new Float32Array(n);
-    let dF = 0;
+    let dF = 0, dA = 0;
     for (const g of segInfo) {
       const cF = new AxisChannel(fs), cL = new AxisChannel(fs, P.LAT_HP);
       for (let i = g.s; i < g.e; i++) {
@@ -880,7 +961,7 @@
         const f = cF.push(h1 * u1[i] + h2 * u2[i]); fa[i] = f.acc; vibF[i] = f.vib;
         vibL[i] = cL.push(-h1 * u2[i] + h2 * u1[i]).vib;
         const cot = 1 / Math.tan(th[i] * Math.PI / 180);
-        speedF[i] = S.speed[i] * cot; dF += Math.abs(S.speed[i]) / 60 / fs * cot; distF[i] = dF;
+        speedF[i] = vs[i] * Math.cos(th[i] * Math.PI / 180) * 60; dF += Math.abs(speedF[i]) / 60 / fs; distF[i] = dF; dA += Math.abs(vs[i]) / fs;
       }
     }
     S.fa = fa; S.vibF = vibF; S.vibL = vibL; S.speedF = speedF; S.distF = distF;
@@ -888,7 +969,7 @@
     let facc = 0, fdec = 0, fsp = 0, asp = 0;
     for (let i = 0; i < n; i++) {
       if (Math.abs(speedF[i]) > fsp) fsp = Math.abs(speedF[i]);
-      const al = Math.abs(S.speed[i]) / Math.sin(th[i] * Math.PI / 180); if (al > asp) asp = al;
+      const al = Math.abs(vs[i]) * 60; if (al > asp) asp = al;
       if (levMask[i]) continue;
       const v = speedF[i], a = fa[i];
       if (Math.abs(v) > 1.5 || moving[i]) {
@@ -903,9 +984,8 @@
       theta: tm, thetaEnd: changes.length ? changes[changes.length - 1].to : tm, changes,
       accMax: facc, decMax: fdec,
       vibF: texture(vibF, vMask, fs) || none,
-      speedMax: changes.length ? fsp : m.speedMax * cot0,
-      speedAlong: changes.length ? asp : m.speedMax / sin0,
-      distV: m.distance, distF: dF, distAlong: Math.hypot(m.distance, dF),
+      speedMax: fsp, speedAlong: asp,
+      distV: m.distance, distF: dF, distAlong: dA,
     };
   }
 
@@ -1072,7 +1152,7 @@
        힘을 주는 시간 1.4초 이상 '슬며시', 0.55초 이하 '엣지 있게' / 힘을 빼는 시간 1.5초 이상 '슬며시', 0.5초 이하 '딱 끊어'
        흔들림의 결: 3 Hz 이하 출렁, 그 위 툭툭, 평소의 2.5배 넘게 한두 번만 튀면 '한 번 툭'
      속력: ~70 저속, ~130 중속, ~250 고속, ~500 초고속, 그 이상 '초고속의 초월' */
-  const EVAL_VER = 35;
+  const EVAL_VER = 36;
   const GRADE = ["아주 좋음", "좋음", "보통", "나쁨", "매우 나쁨"];
   const TH = { jerk: [0.8, 1.0, 1.4, 1.8], vibV: [15, 20, 30, 40], vibL: [10, 15, 25, 35], wave: [15, 30, 45, 60], start: [20, 40, 60, 90], arrive: [20, 40, 60, 90], hit: [1, 2, 4, 8] };
   const TH_INC = Object.assign({}, TH, { vibV: TH.vibV.map(v => v * 2), vibL: TH.vibL.map(v => v * 2) });   // 경사형: 흔들림 기준 2배
