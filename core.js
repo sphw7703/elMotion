@@ -244,10 +244,12 @@
        (카 기울기로 수평축에 섞이는 중력이 천천히 바뀌어도 펄스 동안만 보면 거의 그대로라서)
      · 주성분이 전체 세기의 80% 이상, 경사각 8~72° (그보다 서 있으면 일반 엘리베이터, 그보다 누우면 무빙워크)
      · 60° 이하이고 아주 뚜렷하면(주성분 92% 이상) 첫 펄스에서 바로, 아니면 다음 펄스도 같은 각도(5° 안)일 때 감지
+     · 약한 펄스(연직 속도 변화 0.02~0.05 m/s)도 경사를 찾은 뒤엔 2초 이상·주성분 88% 이상이면 받아 각도 변화를 본다
      · 가속 펄스마다 새 구간. 감속 펄스는 같은 구간에 더해 평균. 반올림한 각도로 2도 이상 달라지면 '경사각이 변화'
      · 실시간 추정(est): 펄스가 이어지는 동안 1초마다 그때까지의 주성분으로 */
   const INC = { LP: 2.0, END: 0.03, PCA: 0.85, MIN_DEG: 8, MAX_DEG: 72, SURE_DEG: 60, SURE_PCA: 0.92, AGREE: 5, CHANGE: 2,
-    Z_LP: 0.5, Z_ON: 0.025, Z_QUIET: 0.015, P_MIN_SEC: 1.0, P_END_SEC: 0.3, P_PCA: 0.8, P_DV: 0.05, P_MAX_SEC: 6 };   // P_DV: 펄스의 연직 속도 변화(m/s) 하한 (실측 0.07~0.33), P_MAX_SEC: 이보다 길면 거기서 닫음 (실측 펄스 3~6초)
+    Z_LP: 0.5, Z_ON: 0.025, Z_QUIET: 0.015, P_MIN_SEC: 1.0, P_END_SEC: 0.3, P_PCA: 0.8, P_DV: 0.05, P_MAX_SEC: 6,
+    W_DV: 0.02, W_SEC: 2.0, W_PCA: 0.88 };   // 약한 펄스(이미 경사를 찾은 뒤 각도 변화만 볼 때): 연직 속도 변화 0.02 m/s 이상, 2초 이상, 주성분 88% 이상이면 받는다 (2026-11-27, 실측 Up1 20°→18°)   // P_DV: 펄스의 연직 속도 변화(m/s) 하한 (실측 0.07~0.33), P_MAX_SEC: 이보다 길면 거기서 닫음 (실측 펄스 3~6초)
   class InclineDetector {
     /** prevTheta: 앞 구간(일시정지 전)에서 정한 경사각. 이 구간의 첫 감지를 그것과 비교한다 */
     constructor(fs = FS, prevTheta = null) {
@@ -266,10 +268,11 @@
       //   (연직 속도를 쌓아 판단하면 실측 잡음에 흔들려서 2026-11-26 바꿈)
       const dv = p.m[0] / this.fs;
       if (!this.dir && Math.abs(dv) >= INC.P_DV / 2) this.dir = Math.sign(dv);   // 첫 출발은 연직 성분이 약하게 잡히기도 해서 하한의 절반으로
-      if (Math.abs(dv) < INC.P_DV) return null;
+      const weak = Math.abs(dv) < INC.P_DV;
+      if (weak && !(this.found && Math.abs(dv) >= INC.W_DV && p.n >= INC.W_SEC * this.fs)) return null;
       const accel = Math.sign(dv) === this.dir;
       const r = InclineDetector.dir(p.C, p.m);
-      if (!r || r.ratio < INC.P_PCA || r.theta < INC.MIN_DEG || r.theta > INC.MAX_DEG) return null;
+      if (!r || r.ratio < (weak ? INC.W_PCA : INC.P_PCA) || r.theta < INC.MIN_DEG || r.theta > INC.MAX_DEG) return null;
       let ev = null;
       if (!this.found) {
         const sure = r.theta <= INC.SURE_DEG && r.ratio >= INC.SURE_PCA, agree = this.cand && Math.abs(this.cand.theta - r.theta) <= INC.AGREE;
@@ -1152,7 +1155,7 @@
        힘을 주는 시간 1.4초 이상 '슬며시', 0.55초 이하 '엣지 있게' / 힘을 빼는 시간 1.5초 이상 '슬며시', 0.5초 이하 '딱 끊어'
        흔들림의 결: 3 Hz 이하 출렁, 그 위 툭툭, 평소의 2.5배 넘게 한두 번만 튀면 '한 번 툭'
      속력: ~70 저속, ~130 중속, ~250 고속, ~500 초고속, 그 이상 '초고속의 초월' */
-  const EVAL_VER = 36;
+  const EVAL_VER = 37;
   const GRADE = ["아주 좋음", "좋음", "보통", "나쁨", "매우 나쁨"];
   const TH = { jerk: [0.8, 1.0, 1.4, 1.8], vibV: [15, 20, 30, 40], vibL: [10, 15, 25, 35], wave: [15, 30, 45, 60], start: [20, 40, 60, 90], arrive: [20, 40, 60, 90], hit: [1, 2, 4, 8] };
   const TH_INC = Object.assign({}, TH, { vibV: TH.vibV.map(v => v * 2), vibL: TH.vibL.map(v => v * 2) });   // 경사형: 흔들림 기준 2배
@@ -1249,6 +1252,7 @@
              ["한 번 쾅", "크게 한 번 쾅", "한두 번 쾅", "한 번 크게 쾅", "한 번 요란하게 쿵"]],
     calm: ["위아래도 좌우도 잔잔해요.", "어느 쪽으로도 흔들림 없이 잔잔해요.", "위아래도 좌우도 고요하고 잔잔해요.", "흔들림 없이 잔잔하고 차분해요.", "물컵을 올려 둬도 될 만큼 잔잔해요."],
     // 상하 흔들림 '아주 좋음'이면 '잔잔하다' 문구 (2026-11-25 사용자 확정)
+    calmH: ["좌우로 잔잔해요.", "좌우 흔들림 없이 잔잔해요.", "좌우로 고요하고 잔잔해요.", "좌우로 물결 없이 잔잔해요.", "좌우로 차분하게 잔잔해요."],
     calmV: ["위아래로 잔잔해요.", "위아래 흔들림 없이 잔잔해요.", "위아래로 고요하고 잔잔해요.", "위아래로 물결 없이 잔잔해요.", "위아래로 차분하게 잔잔해요."],
     // 성격: 힘을 주는 방식·빼는 방식
     riseSoft: ["슬며시 힘을 주며 출발해요.", "천천히 힘을 실으며 나아가요.", "스르르 힘을 더해 가요.", "조심스럽게 속력을 올려요.", "살며시 밀어 주듯 출발해요."],
@@ -1319,11 +1323,12 @@
     // 2) 흔들림
     const dirWord = (t, lv) => { const k = vibKind(t); return k === "none" ? null : pick(WORDS[k][lv]); };
     // 상하 흔들림 등급이 '아주 좋음'이면 위아래는 잔잔한 것으로 말한다 (결이 톡톡이어도)
-    const kV = m.vibV && m.vibV.n && L.vibVg !== 0 ? vibKind(m.vibV) : "none", kL = m.vibL && m.vibL.n ? vibKind(m.vibL) : "none";
+    const kV = !L.noV && m.vibV && m.vibV.n && L.vibVg !== 0 ? vibKind(m.vibV) : "none", kL = m.vibL && m.vibL.n ? vibKind(m.vibL) : "none";
     if (kV !== "none" && kL !== "none" && kV === kL && L.vibV === L.vibL) out.push(`위아래, 좌우로도 ${dirWord(m.vibV, L.vibV)}.`);
     else {
       const wV = kV !== "none" ? dirWord(m.vibV, L.vibV) : null, wL = kL !== "none" ? dirWord(m.vibL, L.vibL) : null;
-      if (!wV && !wL) out.push(pick(m.vibL ? WORDS.calm : WORDS.calmV));
+      if (L.noV) out.push(wL ? `좌우로 ${wL}.` : pick(WORDS.calmH));   // 경사형: 위아래는 말하지 않는다 (2026-11-27)
+      else if (!wV && !wL) out.push(pick(m.vibL ? WORDS.calm : WORDS.calmV));
       else if (wV && wL) out.push(`위아래로 ${wV}, 좌우로는 ${wL}.`);
       else if (wV) out.push(m.vibL ? `좌우는 잔잔하고 위아래로 ${wV}.` : `위아래로 ${wV}.`);
       else out.push(`위아래는 잔잔하고 좌우로 ${wL}.`);
@@ -1360,7 +1365,7 @@
     const useF = inc && L.vibF != null && (L.vibL == null || L.vibF >= L.vibL);
     const { vibF: _f, ...Lt } = L;
     let text = m.speedMax < 3 || overall == null ? "엘리베이터가 움직인 구간을 찾지 못했어요."
-      : aiText(useF ? Object.assign({}, m, { vibL: inc.vibF }) : m, { ...Lt, vibL: useF ? L.vibF : L.vibL, vibV: vibVa, vibVg: L.vibV }, overall, perfect);
+      : aiText(useF ? Object.assign({}, m, { vibL: inc.vibF }) : m, { ...Lt, vibL: useF ? L.vibF : L.vibL, vibV: vibVa, vibVg: L.vibV, noV: !!inc }, overall, perfect);
     if (useF) text = text.replace(/좌우/g, "앞뒤");
     return {
       ver: EVAL_VER, overall: text, level: overall, levels: L,
