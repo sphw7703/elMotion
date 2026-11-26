@@ -161,8 +161,9 @@ const videoMaker = (() => {
     const a0 = g.globalAlpha, path = new Path2D(TriGauge.path());
     g.save(); g.translate(x, y); g.scale(d / 200, d / 200);
     const sc = Math.hypot(g.getTransform().a, g.getTransform().b);
-    // 그림자 + 유리
-    g.save(); g.shadowColor = "rgba(27,42,99,.18)"; g.shadowBlur = 18 * sc; g.shadowOffsetY = 10 * sc; g.fillStyle = "rgba(255,255,255,.25)"; g.fill(path); g.restore();
+    // 오른쪽 아래 두께 + 그림자 (2026-11-26) + 유리
+    g.save(); g.translate(6, 7); g.filter = `blur(${2.5 * sc}px)`; g.fillStyle = "rgba(27,42,99,.16)"; g.fill(path); g.restore();
+    g.save(); g.shadowColor = "rgba(27,42,99,.26)"; g.shadowBlur = 14 * sc; g.shadowOffsetX = 9 * sc; g.shadowOffsetY = 13 * sc; g.fillStyle = "rgba(255,255,255,.25)"; g.fill(path); g.restore();
     const gb = g.createLinearGradient(0, 0, 200, 200); gb.addColorStop(0, "rgba(255,255,255,.62)"); gb.addColorStop(.55, "rgba(255,255,255,.22)"); gb.addColorStop(1, "rgba(255,255,255,.38)");
     g.fillStyle = gb; g.fill(path);
     // 물

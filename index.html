@@ -133,10 +133,13 @@ button:focus-visible, [tabindex]:focus-visible, input:focus-visible { outline: 2
 /* ───── 경사형: 직각삼각형 유리 게이지 (2026-11-26, 처음 시안의 유리 디자인) ───── */
 .tri { position: relative; width: var(--d); height: var(--d); flex: none; }
 .tri-svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
-.tri .tri-shadow { fill: rgba(255,255,255,.25); filter: drop-shadow(0 10px 18px rgba(27,42,99,.18)); }
+/* 오른쪽 아래 그림자로 입체감 (2026-11-26): 살짝 비켜 놓은 두께 + 오른쪽 아래로 번지는 그림자 */
+.tri .tri-depth { fill: rgba(27,42,99,.16); filter: blur(2.5px); }
+.tri .tri-shadow { fill: rgba(255,255,255,.25); filter: drop-shadow(9px 13px 14px rgba(27,42,99,.26)); }
 .tri .tri-edge { stroke: rgba(27,42,99,.10); }
 :root[data-ui="dark"] .tri .tri-glass { opacity: .35; }
-:root[data-ui="dark"] .tri .tri-shadow { fill: rgba(255,255,255,.06); filter: drop-shadow(0 10px 18px rgba(0,0,0,.4)); }
+:root[data-ui="dark"] .tri .tri-depth { fill: rgba(0,0,0,.5); }
+:root[data-ui="dark"] .tri .tri-shadow { fill: rgba(255,255,255,.06); filter: drop-shadow(9px 13px 16px rgba(0,0,0,.55)); }
 :root[data-ui="dark"] .tri .tri-edge { stroke: rgba(255,255,255,.12); }
 .tri .water { transition: transform .5s cubic-bezier(.3,.7,.3,1); }
 .tri .w1, .tri .wl { animation: wave 7s linear infinite; }
@@ -180,7 +183,9 @@ button:focus-visible, [tabindex]:focus-visible, input:focus-visible { outline: 2
 .incl .item .g { padding: 0 40px 30px 44px; }
 .incl:not(.row) .tris { gap: 8px; }
 .incl:not(.row) .item { position: relative; }
-.incl:not(.row) .item .lbl { position: absolute; z-index: 2; top: 0; left: calc(44px + var(--d) * .5); margin: 0; white-space: nowrap; }
+/* 세로 화면 (2026-11-26): 제목은 왼쪽 위로 빼고, 게이지는 오른쪽으로 비켜 놓는다 */
+.incl:not(.row) .item .lbl { position: absolute; z-index: 2; top: 0; left: 0; margin: 0; white-space: nowrap; }
+.incl:not(.row) .item .g { padding-left: 112px; }
 .home-actions { display: flex; justify-content: center; gap: 8px; padding: 8px 0 6px; flex-wrap: wrap; }
 
 /* 숫자·그래프 */
@@ -601,7 +606,7 @@ body.selecting #recList { padding-bottom: 150px; }
 :root.wide .triple .lbl { font-size: 38px; margin-bottom: 8px; }
 :root.wide .incl { flex: 1; justify-content: center; }
 :root.wide .incl .tris { flex-direction: row; justify-content: center; align-items: flex-start; gap: 4vw; }
-:root.wide .incl .item .lbl { font-size: 38px; margin-bottom: 10px; }
+:root.wide .incl .item .lbl { font-size: 57px; margin-bottom: 12px; }   /* 2026-11-26: 150% */
 :root.wide .incl .item .lbl small { font-size: 26px; }
 :root.wide .incl .tris { gap: 0; }
 :root.wide .incl .item { width: calc(var(--d) * 1.25); align-items: flex-start; }

@@ -4,7 +4,7 @@
 /* ───────── 상수 ───────── */
 const FS = Core.FS;
 /* 앱 버전 (2026-11-25 사용자 확정): 0.큰 기능 묶음.고친 횟수 — 웹 앱 확정 때 1.0.0, 안드로이드 앱 때 2.0.0 */
-const APP_VERSION = "0.13.3";
+const APP_VERSION = "0.13.4";
 const LEGEND = { acc: 1.5, lat: 30, latA: 20, spd: 600 };
 const LEGEND_INC = { acc: 0.6, lat: 20, spd: 90 };   // 경사형 게이지 범례 (2026-11-26): 경사형은 60 m/min 이하라 속력 90, 가감속·흔들림은 측정 자료 기준   // 물 높이 범례 (화면에 표시하지 않음). lat: 실시간 p-p, latA: 기록의 |98% 피크|
 const CUT = Math.round(Core.P.CUT_SEC * FS);
@@ -179,6 +179,7 @@ class TriGauge {
       <radialGradient id="gw${id}" cx="25%" cy="70%" r="95%"><stop offset="0" style="stop-color:var(--wl)"/><stop offset=".55" style="stop-color:var(--wm)"/><stop offset="1" style="stop-color:var(--wd)"/></radialGradient>
       <linearGradient id="gt${id}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fff" stop-opacity=".7"/><stop offset=".35" stop-color="#fff" stop-opacity="0"/></linearGradient>
       <mask id="m${id}"><rect width="200" height="200" fill="#000"/><g class="water" style="transform:translateY(200px)"><path class="w1" d="${WAVE}" fill="#fff"/></g></mask></defs>
+      <path d="${d}" class="tri-depth" transform="translate(6 7)"/>
       <path d="${d}" class="tri-shadow"/>
       <path d="${d}" class="tri-glass" fill="url(#gb${id})"/>
       <g clip-path="url(#c${id})"><rect width="200" height="200" fill="url(#gw${id})" mask="url(#m${id})"/>
@@ -754,7 +755,7 @@ const home = {
       // 2026-11-26: 경사형 게이지는 예전보다 1.3배 (화면에 다 들어가는 만큼까지)
       //  세로: 제목을 게이지 오른쪽 위 빈자리에 얹어 세로 공간을 아낀다 / 가로: 왼쪽 숫자를 앞 게이지의 빗변 옆 빈자리에 겹쳐 놓는다
       const old = wide ? clamp(Math.min(innerHeight - 300, (innerWidth - 220) / 3.9), 130, 300) : clamp((innerHeight - 60 - 70 - 110 - 3 * 76) / 3, 96, 170);
-      const fit = wide ? Math.min((innerWidth - 60) / 3.97, innerHeight - 360) : (innerHeight - 250 - 3 * 38) / 3;
+      const fit = wide ? Math.min((innerWidth - 60) / 3.97, innerHeight - 380) : Math.min((innerHeight - 250 - 3 * 34) / 3, innerWidth - 24 - 112 - 46);
       const size = Math.round(Math.max(90, Math.min(old * 1.3, fit)));
       body.innerHTML = `<div class="incl ${wide ? "row" : ""}" style="--d:${size}px"><div class="incl-msg" id="inclMsg"><div class="glass"><h3></h3><p></p><span class="pill"></span></div></div><span class="incl-ang glass" id="inclAng"></span>
         <div class="tris">${[["acc", "가감속도", "m/s²"], ["lat", "흔들림", "gal"], ["spd", "속력", "m/min"]].map(([k, t, u], i) =>
