@@ -1050,7 +1050,7 @@
        힘을 주는 시간 1.4초 이상 '슬며시', 0.55초 이하 '엣지 있게' / 힘을 빼는 시간 1.5초 이상 '슬며시', 0.5초 이하 '딱 끊어'
        흔들림의 결: 3 Hz 이하 출렁, 그 위 툭툭, 평소의 2.5배 넘게 한두 번만 튀면 '한 번 툭'
      속력: ~70 저속, ~130 중속, ~250 고속, ~500 초고속, 그 이상 '초고속의 초월' */
-  const EVAL_VER = 31;
+  const EVAL_VER = 32;
   const GRADE = ["아주 좋음", "좋음", "보통", "나쁨", "매우 나쁨"];
   const TH = { jerk: [0.8, 1.0, 1.4, 1.8], vib: [8, 10, 15, 20], wave: [15, 30, 45, 60], start: [20, 40, 60, 90], arrive: [20, 40, 60, 90], hit: [1, 2, 4, 8] };
   const DEC = { jerk: 2, vib: 1, wave: 0, start: 0, arrive: 0, hit: 1 };
@@ -1279,6 +1279,10 @@
     r.level = e2.level; r.acc = e2.acc;
     r.vibF = e2.vibL ? { ...e2.vibL, line: (e2.vibL.line || "").replace("좌우로", "앞뒤로") } : null;
     r.fa = { a: accLv(I.accMax)[1], d: accLv(I.decMax)[1] };
+    // 경사형 속력 등급 (2026-11-26 사용자 확정): 경사 방향 분속 35 m까지 저속, 그 위로 중속
+    const along = I.speedAlong != null ? I.speedAlong : m.speedMax / sn, gs = along <= 35 ? "저속" : "중속";
+    r.speed = Object.assign({}, r.speed, { s: gs, t: r.speed.t === "정격 속력에 닿기 전에 멈췄어요" ? r.speed.t : `${gs} 승강기예요${m.speedRef ? " (참고값)" : ""}` });
+    if (r.speed.card && r.speed.card !== "정격 속력 미도달") r.speed.card = `${gs} 승강기 · 참고값`;
     return r;
   }
 

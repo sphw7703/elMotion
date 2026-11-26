@@ -4,7 +4,7 @@
 /* ───────── 상수 ───────── */
 const FS = Core.FS;
 /* 앱 버전 (2026-11-25 사용자 확정): 0.큰 기능 묶음.고친 횟수 — 웹 앱 확정 때 1.0.0, 안드로이드 앱 때 2.0.0 */
-const APP_VERSION = "0.13.2";
+const APP_VERSION = "0.13.3";
 const LEGEND = { acc: 1.5, lat: 30, latA: 20, spd: 600 };
 const LEGEND_INC = { acc: 0.6, lat: 20, spd: 90 };   // 경사형 게이지 범례 (2026-11-26): 경사형은 60 m/min 이하라 속력 90, 가감속·흔들림은 측정 자료 기준   // 물 높이 범례 (화면에 표시하지 않음). lat: 실시간 p-p, latA: 기록의 |98% 피크|
 const CUT = Math.round(Core.P.CUT_SEC * FS);
@@ -145,8 +145,9 @@ class Sphere {
 }
 
 /* ───────── 그래프 ───────── */
-/* ───────── 경사형 게이지: 꼭짓점이 둥근 직각삼각형 유리 (직각 = 왼쪽 아래, 2026-11-26 사용자 확정)
-   왼쪽 변 = 수직 값, 아래 변 = 앞뒤 값. 두꺼운 무채색 유리 테두리 + 안쪽 면 + 아래오른쪽 두께. 물은 원형 게이지와 같은 색 */
+/* ───────── 경사형 게이지: 꼭짓점이 둥근 직각삼각형 유리 (직각 = 왼쪽 아래)
+   2026-11-26 사용자 확정: 처음 시안의 디자인(반투명 유리 + 흰 테두리)으로, 꼭짓점은 더 둥글게.
+   왼쪽 변 = 수직, 아래 변 = 앞뒤, (속력만) 빗변 = 경사 방향. 단위는 오른쪽 아래에 작게. 물은 원형 게이지와 같은 색 */
 /* 성능 ③ (2026-11-26): 장식 애니메이션은 화면에 보일 때만, 스크롤 중에는 멈춘다 */
 const deco = {
   io: typeof IntersectionObserver !== "undefined" ? new IntersectionObserver(es => es.forEach(e => { if (!e.target.isConnected) { deco.io.unobserve(e.target); return; } e.target.classList.toggle("off", !e.isIntersecting); })) : null,
@@ -159,57 +160,51 @@ const deco = {
 deco.init();
 let TRI = 0;
 class TriGauge {
-  static path(d, r) {
-    const s2 = Math.SQRT2, P = [[14 + d, 14 + d + d * s2], [14 + d, 186 - d], [186 - d - d * s2, 186 - d]];
-    const R = [r * 1.55, r, r * 1.55];
-    const pt = (a, b, t) => { const dx = b[0] - a[0], dy = b[1] - a[1], L = Math.hypot(dx, dy); return [a[0] + dx / L * t, a[1] + dy / L * t]; };
-    let o = "";
+  static path(r = 24) {
+    const P = [[14, 14], [14, 186], [186, 186]];
+    const pt = (a, b, d) => { const dx = b[0] - a[0], dy = b[1] - a[1], L = Math.hypot(dx, dy); return [a[0] + dx / L * d, a[1] + dy / L * d]; };
+    let d = "";
     for (let i = 0; i < 3; i++) {
-      const p = P[i], a = pt(p, P[(i + 2) % 3], R[i]), b = pt(p, P[(i + 1) % 3], R[i]);
-      o += `${i ? "L" : "M"}${a[0].toFixed(1)} ${a[1].toFixed(1)}C${((a[0] + 2 * p[0]) / 3).toFixed(1)} ${((a[1] + 2 * p[1]) / 3).toFixed(1)} ${((b[0] + 2 * p[0]) / 3).toFixed(1)} ${((b[1] + 2 * p[1]) / 3).toFixed(1)} ${b[0].toFixed(1)} ${b[1].toFixed(1)}`;
+      const p = P[i], R = r * (i === 1 ? 1 : 1.35), a = pt(p, P[(i + 2) % 3], R), b = pt(p, P[(i + 1) % 3], R);
+      d += `${i ? "L" : "M"}${a[0].toFixed(1)} ${a[1].toFixed(1)}Q${p[0]} ${p[1]} ${b[0].toFixed(1)} ${b[1].toFixed(1)}`;
     }
-    return o + "Z";
+    return d + "Z";
   }
-  constructor(kind, size) {
-    const id = "tg" + ++TRI, T = TriGauge.path;
-    const outer = T(0, 36), tube = T(6.5, 30), tubeS = T(7.6, 29), inner = T(13, 24);
-    const ext = [7, 6, 5, 4, 3, 2, 1].map(k => `<path d="${outer}" transform="translate(${(k * 0.9).toFixed(1)} ${k})"/>`).join("");
+  constructor(kind, size, unit) {
+    const id = "tg" + ++TRI, d = TriGauge.path();
     this.el = document.createElement("div"); this.el.className = `tri k-${kind}`; this.el.style.cssText = `--d:${size}px`;
     this.el.innerHTML = `<svg viewBox="0 0 200 200" class="tri-svg" aria-hidden="true"><defs>
-      <clipPath id="c${id}"><path d="${inner}"/></clipPath>
-      <linearGradient id="rim${id}" x1="0" y1="0" x2="1" y2="1"><stop offset="0" class="r0"/><stop offset=".45" class="r1"/><stop offset=".75" class="r2"/><stop offset="1" class="r3"/></linearGradient>
-      <linearGradient id="face${id}" x1="0" y1="0" x2="1" y2=".35"><stop offset="0" class="f0"/><stop offset=".55" class="f1"/><stop offset="1" class="f2"/></linearGradient>
-      <linearGradient id="ext${id}" x1="0" y1="0" x2="1" y2="1"><stop offset="0" class="e0"/><stop offset="1" class="e1"/></linearGradient>
-      <radialGradient id="gw${id}" cx="25%" cy="75%" r="95%"><stop offset="0" style="stop-color:var(--wl)"/><stop offset=".55" style="stop-color:var(--wm)"/><stop offset="1" style="stop-color:var(--wd)"/></radialGradient>
-      <linearGradient id="sp${id}" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#fff" stop-opacity=".55"/><stop offset=".25" stop-color="#fff" stop-opacity="0"/></linearGradient>
-      <linearGradient id="sh${id}" x1="0" y1="0" x2=".7" y2=".7"><stop offset="0" stop-color="#fff" stop-opacity=".75"/><stop offset=".35" stop-color="#fff" stop-opacity="0"/><stop offset=".8" stop-color="#fff" stop-opacity="0"/><stop offset="1" stop-color="#fff" stop-opacity=".35"/></linearGradient>
+      <clipPath id="c${id}"><path d="${d}"/></clipPath>
+      <linearGradient id="gb${id}" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#fff" stop-opacity=".62"/><stop offset=".55" stop-color="#fff" stop-opacity=".22"/><stop offset="1" stop-color="#fff" stop-opacity=".38"/></linearGradient>
+      <radialGradient id="gw${id}" cx="25%" cy="70%" r="95%"><stop offset="0" style="stop-color:var(--wl)"/><stop offset=".55" style="stop-color:var(--wm)"/><stop offset="1" style="stop-color:var(--wd)"/></radialGradient>
+      <linearGradient id="gt${id}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fff" stop-opacity=".7"/><stop offset=".35" stop-color="#fff" stop-opacity="0"/></linearGradient>
       <mask id="m${id}"><rect width="200" height="200" fill="#000"/><g class="water" style="transform:translateY(200px)"><path class="w1" d="${WAVE}" fill="#fff"/></g></mask></defs>
-      <path class="t-shadow" d="${outer}" transform="translate(4 12)"/>
-      <g fill="url(#ext${id})">${ext}</g>
-      <path d="${outer} ${inner}" fill-rule="evenodd" fill="url(#rim${id})" class="t-rim"/>
-      <path d="${inner}" fill="url(#face${id})"/>
+      <path d="${d}" class="tri-shadow"/>
+      <path d="${d}" class="tri-glass" fill="url(#gb${id})"/>
       <g clip-path="url(#c${id})"><rect width="200" height="200" fill="url(#gw${id})" mask="url(#m${id})"/>
-        <g class="water" style="transform:translateY(200px)"><path class="wl" d="${WAVE_LINE}" fill="none" stroke="rgba(255,255,255,.55)" stroke-width="1.3"/></g>
-        <rect width="200" height="200" fill="url(#sp${id})"/></g>
-      <path d="${inner}" fill="none" class="t-in"/>
-      <path d="${tubeS}" fill="none" class="t-tubes"/><path d="${tube}" fill="none" class="t-tube"/>
-      <path d="${outer} ${inner}" fill-rule="evenodd" fill="url(#sh${id})"/>
-      <path d="${outer}" fill="none" class="t-out"/></svg>
-      <div class="tri-v"><b></b><i>수직</i></div><div class="tri-h"><b></b><i>앞뒤</i></div>`;
+        <g class="water" style="transform:translateY(200px)"><path class="wl" d="${WAVE_LINE}" fill="none" stroke="rgba(255,255,255,.5)" stroke-width="1.4"/></g>
+        <path d="M14 14 L14 120 L120 120 Z" fill="url(#gt${id})" opacity=".5"/></g>
+      <path d="${d}" fill="none" stroke="rgba(255,255,255,.95)" stroke-width="2.2"/>
+      <path d="${d}" fill="none" class="tri-edge" stroke-width="1"/></svg>
+      <div class="tri-v"><b></b><i>수직</i></div><div class="tri-h"><b></b><i>앞뒤</i></div>${kind === "spd" ? `<div class="tri-s"><b></b><i>경사 방향</i></div>` : ""}<div class="tri-u">${unit || ""}</div>`;
     this.waters = [...this.el.querySelectorAll(".water")];
-    this.vb = this.el.querySelector(".tri-v b"); this.hb = this.el.querySelector(".tri-h b");
+    this.vb = this.el.querySelector(".tri-v b"); this.hb = this.el.querySelector(".tri-h b"); this.sb = this.el.querySelector(".tri-s b");
     deco.watch(this.el);
     this.lv = -1;
   }
-  /** 0~1: 안쪽 면 바닥(173)에서 꼭대기(약 45)까지 */
+  /** 0~1: 바닥(186)에서 꼭대기(14)까지 */
   level(v) {
     v = clamp(v, 0, 1); if (Math.abs(v - this.lv) < 0.002) return this;
     this.lv = v;
     const shown = v <= 0 ? -0.05 : Math.max(v, 0.045);
-    const t = `translateY(${173 - shown * 150 - 6}px)`;
+    const t = `translateY(${186 - shown * 172 - 6}px)`;
     this.waters.forEach(w => { w.style.transform = t; }); return this;
   }
-  vals(vert, fore) { if (vert != null) this.vb.textContent = vert; if (fore != null) this.hb.textContent = fore; return this; }
+  /** 수직 · 앞뒤 · (속력) 경사 방향 */
+  vals(vert, fore, along) {
+    if (vert != null) this.vb.textContent = vert; if (fore != null) this.hb.textContent = fore;
+    if (along != null && this.sb) this.sb.textContent = along; return this;
+  }
 }
 
 const charts = {
@@ -756,14 +751,18 @@ const home = {
     } else if (kind === "live-incl") {
       // 경사형 (2026-11-26 사용자 확정): 게이지를 모두 지우고 직각삼각형 게이지 3개. 세로 화면은 위아래로, 가로 화면은 옆으로 나란히
       const wide = isWide();
-      const avail = innerHeight - 60 - 70 - 110 - 3 * 76;
-      const size = wide ? Math.round(clamp(Math.min(innerHeight - 300, (innerWidth - 220) / 3.9), 130, 300)) : Math.round(clamp(avail / 3, 96, 170));
-      body.innerHTML = `<div class="incl ${wide ? "row" : ""}"><div class="incl-msg" id="inclMsg"><div class="glass"><h3></h3><p></p><span class="pill"></span></div></div><span class="incl-ang glass" id="inclAng"></span>
+      // 2026-11-26: 경사형 게이지는 예전보다 1.3배 (화면에 다 들어가는 만큼까지)
+      //  세로: 제목을 게이지 오른쪽 위 빈자리에 얹어 세로 공간을 아낀다 / 가로: 왼쪽 숫자를 앞 게이지의 빗변 옆 빈자리에 겹쳐 놓는다
+      const old = wide ? clamp(Math.min(innerHeight - 300, (innerWidth - 220) / 3.9), 130, 300) : clamp((innerHeight - 60 - 70 - 110 - 3 * 76) / 3, 96, 170);
+      const fit = wide ? Math.min((innerWidth - 60) / 3.97, innerHeight - 360) : (innerHeight - 250 - 3 * 38) / 3;
+      const size = Math.round(Math.max(90, Math.min(old * 1.3, fit)));
+      body.innerHTML = `<div class="incl ${wide ? "row" : ""}" style="--d:${size}px"><div class="incl-msg" id="inclMsg"><div class="glass"><h3></h3><p></p><span class="pill"></span></div></div><span class="incl-ang glass" id="inclAng"></span>
         <div class="tris">${[["acc", "가감속도", "m/s²"], ["lat", "흔들림", "gal"], ["spd", "속력", "m/min"]].map(([k, t, u], i) =>
-          `<div class="item fade-in" style="animation-delay:${0.1 + i * 0.1}s"><div class="lbl">${t}<small>${u}</small></div><div class="g" id="tg-${k}"></div></div>`).join("")}</div></div>`;
+          `<div class="item fade-in" style="animation-delay:${0.1 + i * 0.1}s"><div class="lbl">${t}</div><div class="g" id="tg-${k}"></div></div>`).join("")}</div></div>`;
       this.tris = {}; this.liveAt = {};
-      for (const k of ["acc", "lat", "spd"]) { const g = new TriGauge(k, size); $(`#tg-${k}`).appendChild(g.el); g.vals("0.00", "0.00").level(0); this.tris[k] = g; }
-      this.tris.lat.vals("0.0", "0.0"); this.tris.spd.vals("0.0", "0.0");
+      const U = { acc: "m/s²", lat: "gal", spd: "m/min" };
+      for (const k of ["acc", "lat", "spd"]) { const g = new TriGauge(k, size, U[k]); $(`#tg-${k}`).appendChild(g.el); g.vals("0.00", "0.00").level(0); this.tris[k] = g; }
+      this.tris.lat.vals("0.0", "0.0"); this.tris.spd.vals("0.0", "0.0", "0.0");
       this.inclMsg();
     } else if (kind === "live-simple") {
       const avail = innerHeight - 60 - 70 - 110 - 3 * 44;
@@ -892,7 +891,7 @@ const home = {
       const I = ctl.incl, rad = I.theta * Math.PI / 180, cot = 1 / Math.tan(rad), sn = Math.sin(rad), f = ctl.of, T = this.tris;
       if (due("acc")) { const av = Math.abs(o.acc), af = f ? Math.abs(f.acc) : av * cot; T.acc.vals(av.toFixed(2), af.toFixed(2)).level(Math.hypot(av, af) / LEGEND_INC.acc); }
       if (due("lat")) { const pv = o.ppV, pf = f ? f.pp : 0; T.lat.vals(pv.toFixed(1), f ? pf.toFixed(1) : "—").level(Math.max(pv, pf) / LEGEND_INC.lat); }
-      if (due("spd")) { const sv = Math.abs(o.speed); T.spd.vals(sv.toFixed(1), (sv * cot).toFixed(1)).level(sv / sn / LEGEND_INC.spd); }
+      if (due("spd")) { const sv = Math.abs(o.speed); T.spd.vals(sv.toFixed(1), (sv * cot).toFixed(1), (sv / sn).toFixed(1)).level(sv / sn / LEGEND_INC.spd); }
     } else if (this.trip) {
       if (due("acc")) this.trip.acc.level(Math.abs(o.acc) / LEGEND.acc).text(Math.abs(o.acc).toFixed(2), null, "m/s²");
       if (due("lat")) this.trip.lat.level(o.ppL / LEGEND.lat).text(o.ppL.toFixed(1), null, "gal");
@@ -1227,17 +1226,17 @@ const detail = {
       { k: "acc", lbl: "가감속도", u: "m/s²", v: Math.max(m.accMax, m.decMax).toFixed(2), f: Math.max(I.accMax, I.decMax).toFixed(2), lv: m.accPeak / sn / LEGEND_INC.acc,
         b: { lv: "n", t: ev.acc.t }, p: `가속 최대 ${m.accMax.toFixed(2)} · ${I.accMax.toFixed(2)}, 감속 최대 ${m.decMax.toFixed(2)} · ${I.decMax.toFixed(2)} m/s² (수직 · 앞뒤)` },
       { k: "lat", lbl: "흔들림", u: "gal", v: m.vibV && m.vibV.n ? m.vibV.p98.toFixed(1) : "—", f: I.vibF.n ? I.vibF.p98.toFixed(1) : "—",
-        lv: Math.max(m.vibV ? m.vibV.p98 : 0, I.vibF.p98) / LEGEND_INC.lat, b: { lv: worse.lv, t: worse.s }, p: [ev.vibV.line, ev.vibF && ev.vibF.line].filter(Boolean).join(" · ") },
+        lv: Math.max(m.vibV ? m.vibV.p98 : 0, I.vibF.p98) / LEGEND_INC.lat, b: { lv: worse.lv, t: worse.s }, p: [ev.vibV.line, ev.vibF && ev.vibF.line].filter(Boolean).join("\n") },   // 위아래 줄 · 앞뒤 줄을 나눠서 (2026-11-26)
       { k: "spd", lbl: "속력", u: "m/min", v: m.speedMax.toFixed(1), f: I.speedMax.toFixed(1), lv: along / LEGEND_INC.spd,
-        b: { lv: "n", t: `경사 방향 ${along.toFixed(1)} m/min` }, p: I.changes.length ? "경사가 바뀌어 경사 방향 속력은 가장 빠를 때의 값이에요." : ev.speed.s ? `${ev.speed.s} 승강기` : "" },
+        b: { lv: "n", t: ev.speed.t }, p: I.changes.length ? "경사가 바뀌어 경사 방향 속력은 가장 빠를 때의 값이에요." : "" },
     ];
     const size = isWide() ? Math.round(clamp(Math.min(innerHeight * 0.36, innerWidth / 5.6), 140, 250)) : Math.round(clamp(innerWidth * 0.33, 110, 140));
     body.innerHTML = this.inclHead(I) + `<div class="d-rows incl-rows">${rows.map((r, i) => `<div class="d-row fade-in" style="animation-delay:${0.1 + i * 0.1}s">
-        <div><div class="lbl">${r.lbl} <small>${r.u}</small></div><div class="g" id="ds-${r.k}"></div></div>
+        <div><div class="lbl">${r.lbl}</div><div class="g" id="ds-${r.k}"></div></div>
         <div class="ev"><b class="lv${r.b.lv}">${esc(r.b.t)}</b>${r.p ? `<p>${esc(r.p)}</p>` : ""}</div></div>`).join("")}</div>`;
     rows.forEach((r, i) => {
-      const g = new TriGauge(r.k, size); $(`#ds-${r.k}`).appendChild(g.el);
-      g.vals(r.v, r.f).level(0);
+      const g = new TriGauge(r.k, size, r.u); $(`#ds-${r.k}`).appendChild(g.el);
+      g.vals(r.v, r.f, r.k === "spd" ? along.toFixed(1) : null).level(0);
       setTimeout(() => g.level(Math.max(r.lv, r.v === "—" ? 0 : 0.03)), 250 + i * 150);
     });
   },

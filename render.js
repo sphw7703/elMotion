@@ -155,53 +155,48 @@ const videoMaker = (() => {
     g.font = F(200, us); g.fillStyle = "rgba(255,255,255,.88)"; g.fillText(unit, right + (two ? d * .05 : 0), yy + us * .95);
     g.restore();
   }
-  /** 경사형 직각삼각형 유리 게이지 (앱의 TriGauge와 같은 모양·색, 라이트). x, y: 왼쪽 위, d: 한 변 (2026-11-26) */
-  const TRI_C = { e: ["#C9CDD6", "#9EA4B2"], r: ["#FFFFFF", "#E4E7ED", "#C3C8D2", "#EEF0F4"], f: ["#F6F7F9", "#E3E6EC", "#C9CDD6"] };
-  function triGauge(g, P, x, y, d, kind, level, vText, fText, t) {
-    const T = TriGauge.path, a0 = g.globalAlpha;
-    const outer = new Path2D(T(0, 36)), inner = new Path2D(T(13, 24)), tube = new Path2D(T(6.5, 30)), tubeS = new Path2D(T(7.6, 29));
-    const ring = new Path2D(T(0, 36) + " " + T(13, 24));
-    const lin = (x0, y0, x1, y1, cs) => { const lg = g.createLinearGradient(x0, y0, x1, y1); cs.forEach((c, i) => lg.addColorStop(Array.isArray(c) ? c[0] : i / (cs.length - 1), Array.isArray(c) ? c[1] : c)); return lg; };
+  /** 경사형 직각삼각형 유리 게이지 (앱의 TriGauge와 같은 모양·색, 라이트). x, y: 왼쪽 위, d: 한 변 (2026-11-26)
+      왼쪽 변 = 수직, 아래 변 = 앞뒤, along이 있으면 빗변 = 경사 방향. 단위는 오른쪽 아래 */
+  function triGauge(g, P, x, y, d, kind, level, vText, fText, t, unit, along) {
+    const a0 = g.globalAlpha, path = new Path2D(TriGauge.path());
     g.save(); g.translate(x, y); g.scale(d / 200, d / 200);
     const sc = Math.hypot(g.getTransform().a, g.getTransform().b);
-    // 그림자 · 두께
-    g.save(); g.translate(4, 12); g.filter = `blur(${7 * sc}px)`; g.fillStyle = "rgba(27,42,99,.16)"; g.fill(outer); g.restore();
-    g.fillStyle = lin(0, 0, 200, 200, TRI_C.e);
-    for (let k = 7; k >= 1; k--) { g.save(); g.translate(k * .9, k); g.fill(outer); g.restore(); }
-    // 테두리 · 안쪽 면
-    g.globalAlpha = a0 * .92; g.fillStyle = lin(0, 0, 200, 200, [[0, TRI_C.r[0]], [.45, TRI_C.r[1]], [.75, TRI_C.r[2]], [1, TRI_C.r[3]]]); g.fill(ring, "evenodd"); g.globalAlpha = a0;
-    g.fillStyle = lin(0, 0, 200, 70, [[0, TRI_C.f[0]], [.55, TRI_C.f[1]], [1, TRI_C.f[2]]]); g.fill(inner);
+    // 그림자 + 유리
+    g.save(); g.shadowColor = "rgba(27,42,99,.18)"; g.shadowBlur = 18 * sc; g.shadowOffsetY = 10 * sc; g.fillStyle = "rgba(255,255,255,.25)"; g.fill(path); g.restore();
+    const gb = g.createLinearGradient(0, 0, 200, 200); gb.addColorStop(0, "rgba(255,255,255,.62)"); gb.addColorStop(.55, "rgba(255,255,255,.22)"); gb.addColorStop(1, "rgba(255,255,255,.38)");
+    g.fillStyle = gb; g.fill(path);
     // 물
-    g.save(); g.clip(inner);
+    g.save(); g.clip(path);
     if (level > 0) {
-      const top = 173 - Math.max(level, .045) * 150, c = KIND[kind], rg = g.createRadialGradient(50, 150, 0, 50, 150, 190);
+      const top = 186 - Math.max(level, .045) * 172, c = KIND[kind], rg = g.createRadialGradient(50, 140, 0, 50, 140, 190);
       rg.addColorStop(0, c[0]); rg.addColorStop(.55, c[1]); rg.addColorStop(1, c[2]);
-      g.beginPath(); g.moveTo(0, 200);
-      for (let k = 0; k <= 40; k++) g.lineTo(k * 5, top + Math.sin(k / 40 * Math.PI * 4 + t * 1.8) * 3);
-      g.lineTo(200, 200); g.closePath(); g.fillStyle = rg; g.fill();
-      g.beginPath(); for (let k = 0; k <= 40; k++) g.lineTo(k * 5, top + Math.sin(k / 40 * Math.PI * 4 + t * 1.8) * 3);
-      g.strokeStyle = "rgba(255,255,255,.55)"; g.lineWidth = 1.3; g.stroke();
+      const wave = () => { for (let k = 0; k <= 40; k++) g.lineTo(k * 5, top + Math.sin(k / 40 * Math.PI * 4 + t * 1.8) * 3); };
+      g.beginPath(); g.moveTo(0, 200); wave(); g.lineTo(200, 200); g.closePath(); g.fillStyle = rg; g.fill();
+      g.beginPath(); wave(); g.strokeStyle = "rgba(255,255,255,.5)"; g.lineWidth = 1.4; g.stroke();
     }
-    g.fillStyle = lin(0, 0, 200, 0, [[0, "rgba(255,255,255,.55)"], [.25, "rgba(255,255,255,0)"]]); g.fillRect(0, 0, 200, 200);
+    const gt = g.createLinearGradient(0, 14, 0, 120); gt.addColorStop(0, "rgba(255,255,255,.7)"); gt.addColorStop(.35, "rgba(255,255,255,0)");
+    g.globalAlpha = a0 * .5; g.fillStyle = gt; g.beginPath(); g.moveTo(14, 14); g.lineTo(14, 120); g.lineTo(120, 120); g.closePath(); g.fill(); g.globalAlpha = a0;
     g.restore();
-    // 선: 안쪽 테 · 튜브 · 윗면 광택 · 바깥 테
     g.lineJoin = "round";
-    g.strokeStyle = "rgba(40,48,72,.22)"; g.lineWidth = 1.6; g.stroke(inner);
-    g.strokeStyle = "rgba(30,40,70,.14)"; g.lineWidth = 1.2; g.stroke(tubeS);
-    g.strokeStyle = "rgba(255,255,255,.95)"; g.lineWidth = 1.6; g.stroke(tube);
-    g.fillStyle = lin(0, 0, 140, 140, [[0, "rgba(255,255,255,.75)"], [.35, "rgba(255,255,255,0)"], [.8, "rgba(255,255,255,0)"], [1, "rgba(255,255,255,.35)"]]); g.fill(ring, "evenodd");
-    g.strokeStyle = "rgba(255,255,255,.9)"; g.lineWidth = 1.4; g.stroke(outer);
+    g.strokeStyle = "rgba(255,255,255,.95)"; g.lineWidth = 2.2; g.stroke(path);
+    g.strokeStyle = "rgba(27,42,99,.10)"; g.lineWidth = 1; g.stroke(path);
     g.restore();
-    // 숫자: 왼쪽 변 = 수직, 아래 변 = 앞뒤 (앱과 같은 자리)
-    const ns = d * .13, ls = d * .056;
+    // 숫자 (앱과 같은 자리)
+    const ns = d * .13, ls = d * .06, us = d * .065;
     g.save(); g.textBaseline = "alphabetic";
     g.font = F(800, ns); g.fillStyle = P.ink; g.textAlign = "right";
     const vx = x + d * .07 - 6, vy = y + d * .6 + ns * .1; g.fillText(vText, vx, vy);
     g.font = F(700, ls); g.fillStyle = P.ink3; g.fillText("수직", vx, vy + ls * 1.25);
     g.font = F(800, ns); const fw = g.measureText(fText).width; g.font = F(700, ls); const lw = g.measureText("앞뒤").width;
-    const fx = x + d * .47 - (fw + 8 + lw) / 2, fy = y + d * .95 + 4 + ns * .92;
+    const fx = x + d * .5 - (fw + 8 + lw) / 2, fy = y + d * .95 + 4 + ns * .92;
     g.textAlign = "left"; g.font = F(800, ns); g.fillStyle = P.ink; g.fillText(fText, fx, fy);
     g.font = F(700, ls); g.fillStyle = P.ink3; g.fillText("앞뒤", fx + fw + 8, fy);
+    if (along != null) {
+      const sx = x + d * .58, sy = y + d * .47 + ns * .1;
+      g.font = F(800, ns); g.fillStyle = P.ink; g.fillText(along, sx, sy);
+      g.font = F(700, ls); g.fillStyle = P.ink3; g.fillText("경사 방향", sx, sy + ls * 1.25);
+    }
+    if (unit) { g.font = F(700, us); g.fillStyle = P.ink3; g.fillText(unit, x + d * .95 + 2, y + d * .9 + us); }
     g.restore();
   }
   function star(g, cx, cy, s) {
@@ -374,9 +369,9 @@ const videoMaker = (() => {
       gauges[1].lbl = "흔들림"; gauges[1].lv = Math.max(m.vibV ? m.vibV.p98 : 0, I.vibF.p98) / LEGEND_INC.lat;
       gauges[1].a = m.vibV && m.vibV.n ? m.vibV.p98.toFixed(1) : "—"; gauges[1].bv = I.vibF.n ? I.vibF.p98.toFixed(1) : "—";
       gauges[1].b = [worse.s]; gauges[1].bl = worse.lv; gauges[1].bScale = 1.3;
-      gauges[1].p = [ev.vibV.line, ev.vibF && ev.vibF.line].filter(Boolean).map(l => l.replace(/ · 약 [\d.]+ Hz$/, "")).join(" · ");
+      gauges[1].p = [ev.vibV.line, ev.vibF && ev.vibF.line].filter(Boolean).map(l => l.replace(/ · 약 [\d.]+ Hz$/, "")).join("\n");   // 위아래 · 앞뒤 줄을 나눠서
       gauges[2].lv = along / LEGEND_INC.spd; gauges[2].a = m.speedMax.toFixed(1); gauges[2].bv = I.speedMax.toFixed(1);
-      gauges[2].b = [`경사 방향 ${along.toFixed(1)} m/min`]; gauges[2].bl = -1;
+      gauges[2].al = along.toFixed(1); gauges[2].b = [ev.speed.t.replace(/요$/, "요.")]; gauges[2].bl = -1;
     }
     // 게이지: 크기는 예전(400)의 125% → 500, 사이 빈틈은 예전(가운데 간격 W/3 ≈ 774 − 400 = 374)의 1/2 → 187 (2026-11-25 사용자 확정)
     const G1 = { lbl: 76, lblF: 114, drop: 50, b: 64, bLh: 80, p: 44, pLh: 56, d: 500, gap: 500 + (W / 3 - 400) / 2 };
@@ -385,9 +380,9 @@ const videoMaker = (() => {
     // 숫자와 단위, '약 7.5 Hz' 같은 묶음은 줄이 바뀌어도 떨어지지 않게 붙여 둔다
     const glue = x => x.replace(/(최대|약) ([\d.]+)/g, "$1\u00a0$2").replace(/([\d.]+) (m\/s²|gal|m\/min|Hz)/g, "$1\u00a0$2").replace(/ · /g, "\u00a0· ");
     // 큰 글은 정해 둔 줄 그대로 (가속 줄·감속 줄), 작은 글만 옆 게이지 글과 겹치지 않을 폭에서 줄바꿈
-    g.font = F(400, G1.p); gauges.forEach(q => { q.pl = q.p ? wrap(g, glue(q.p), G1.colW - 60) : []; });
+    g.font = F(400, G1.p); gauges.forEach(q => { q.pl = q.p ? q.p.split("\n").flatMap(l => wrap(g, glue(l), G1.colW - 60)) : []; });
     g.font = F(800, G1.b); gauges.forEach(q => { q.bl2 = q.b.slice(); });
-    const TRI_D = 400, TRI_EX = TRI ? TRI_D * .95 + 4 + TRI_D * .13 + 20 - G1.d : 0;   // 삼각형: 한 변 400, 아래 숫자만큼 글을 내린다
+    const TRI_D = 520, TRI_EX = TRI ? TRI_D * .95 + 4 + TRI_D * .13 + 20 - G1.d : 0;   // 삼각형: 한 변 520 (예전 400의 1.3배, 2026-11-26), 아래 숫자만큼 글을 내린다
     const colH = q => G1.lbl + G1.sp + G1.d + TRI_EX + 40 + q.bl2.length * G1.bLh * (q.bScale || 1) + (q.pl.length ? 12 + q.pl.length * G1.pLh : 0);
     const G1top = Math.max(40, (H - Math.max(...gauges.map(colH))) / 2);
     // 자세히 배치 (1920 폭의 긴 쪽 위 좌표)
@@ -462,7 +457,7 @@ const videoMaker = (() => {
           g.save(); g.globalAlpha *= kA; g.translate(x, y); g.scale(.7 + .3 * kIn, .7 + .3 * kIn); g.translate(-x, -y);
           g.fillStyle = P.ink2; g.font = F(800, G1.lblF); g.textAlign = "center"; g.textBaseline = "alphabetic"; g.fillText(q.lbl, x, yL);
           const lv = clamp(q.lv, q.a === "—" ? 0 : .03, 1) * glide(seg(t, .5 + i * .15, 2.1 + i * .15));
-          if (TRI) triGauge(g, P, x - TRI_D / 2 + TRI_D * .1, y - d / 2, TRI_D, q.k, lv, q.a, q.bv, t);
+          if (TRI) triGauge(g, P, x - TRI_D / 2 + TRI_D * .05, y - d / 2, TRI_D, q.k, lv, q.a, q.bv, t, q.u, q.al);
           else sphere(g, P, x, y, d, q.k, lv, q.a, q.bv, q.u, t);
           g.restore();
           // 아래 글: 게이지보다 살짝 늦게 통 올라옴
