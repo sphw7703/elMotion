@@ -356,7 +356,7 @@ const videoMaker = (() => {
       const s = SERIES.find(x => x.key === k), c = document.createElement("canvas");
       c.style.cssText = `display:block;width:${gw - 20}px;height:${gh - 74}px`; host.appendChild(c);
       const comment = { acc: ev.acc.s, jerk: ev.jerk.s, vibV: ev.vibV.s, vibL: ev.vibL ? ev.vibL.s : "" }[k];
-      const chObj = new Chart(c, { values: S[k], rate: rec.rate, color: s.color, half: s.half, dec: s.dec, unit: s.unit, animate: false, marks: true, spans: (k === "vibV" || k === "vibL") && m.cruise.length ? m.cruise : null, pauses: m.pauses });
+      const chObj = new Chart(c, { values: S[k], rate: rec.rate, color: s.color, half: s.half, dec: s.dec, unit: s.unit, animate: false, hiRes: true, marks: true, spans: (k === "vibV" || k === "vibL") && m.cruise.length ? m.cruise : null, pauses: m.pauses });
       return { s, c, ch: chObj, comment };
     });
 

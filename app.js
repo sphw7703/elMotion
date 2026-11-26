@@ -4,12 +4,13 @@
 /* ───────── 상수 ───────── */
 const FS = Core.FS;
 /* 앱 버전 (2026-11-25 사용자 확정): 0.큰 기능 묶음.고친 횟수 — 웹 앱 확정 때 1.0.0, 안드로이드 앱 때 2.0.0 */
-const APP_VERSION = "0.12.1";
-const LEGEND = { acc: 1.5, lat: 30, latA: 20, spd: 600 };   // 물 높이 범례 (화면에 표시하지 않음). lat: 실시간 p-p, latA: 기록의 |98% 피크|
+const APP_VERSION = "0.13.0";
+const LEGEND = { acc: 1.5, lat: 30, latA: 20, spd: 600 };
+const LEGEND_INC = { acc: 0.6, lat: 20, spd: 90 };   // 경사형 게이지 범례 (2026-11-26): 경사형은 60 m/min 이하라 속력 90, 가감속·흔들림은 측정 자료 기준   // 물 높이 범례 (화면에 표시하지 않음). lat: 실시간 p-p, latA: 기록의 |98% 피크|
 const CUT = Math.round(Core.P.CUT_SEC * FS);
 const CUT_MANUAL = Math.round(0.3 * FS);   // 수동 모드 종료 시 버려지는 마지막 0.3초
 const HOLD_MS = 300;                       // 측정 재개: 이만큼 길게 눌러야 한다
-const RECAL_N = Math.round(0.5 * FS);      // 재개 전 센서 보정 0.5초
+const RECAL_N = Math.round(1.0 * FS);      // 재개 전 센서 보정 1초 (2026-11-26)
 const LIVE_WIN = FS * 10;
 
 /* ───────── 공통 도구 ───────── */
@@ -143,6 +144,62 @@ class Sphere {
 }
 
 /* ───────── 그래프 ───────── */
+/* ───────── 경사형 게이지: 꼭짓점이 둥근 직각삼각형 유리 (직각 = 왼쪽 아래, 2026-11-26 사용자 확정)
+   왼쪽 변 = 수직 값, 아래 변 = 앞뒤 값. 두꺼운 무채색 유리 테두리 + 안쪽 면 + 아래오른쪽 두께. 물은 원형 게이지와 같은 색 */
+let TRI = 0;
+class TriGauge {
+  static path(d, r) {
+    const s2 = Math.SQRT2, P = [[14 + d, 14 + d + d * s2], [14 + d, 186 - d], [186 - d - d * s2, 186 - d]];
+    const R = [r * 1.55, r, r * 1.55];
+    const pt = (a, b, t) => { const dx = b[0] - a[0], dy = b[1] - a[1], L = Math.hypot(dx, dy); return [a[0] + dx / L * t, a[1] + dy / L * t]; };
+    let o = "";
+    for (let i = 0; i < 3; i++) {
+      const p = P[i], a = pt(p, P[(i + 2) % 3], R[i]), b = pt(p, P[(i + 1) % 3], R[i]);
+      o += `${i ? "L" : "M"}${a[0].toFixed(1)} ${a[1].toFixed(1)}C${((a[0] + 2 * p[0]) / 3).toFixed(1)} ${((a[1] + 2 * p[1]) / 3).toFixed(1)} ${((b[0] + 2 * p[0]) / 3).toFixed(1)} ${((b[1] + 2 * p[1]) / 3).toFixed(1)} ${b[0].toFixed(1)} ${b[1].toFixed(1)}`;
+    }
+    return o + "Z";
+  }
+  constructor(kind, size) {
+    const id = "tg" + ++TRI, T = TriGauge.path;
+    const outer = T(0, 36), tube = T(6.5, 30), tubeS = T(7.6, 29), inner = T(13, 24);
+    const ext = [7, 6, 5, 4, 3, 2, 1].map(k => `<path d="${outer}" transform="translate(${(k * 0.9).toFixed(1)} ${k})"/>`).join("");
+    this.el = document.createElement("div"); this.el.className = `tri k-${kind}`; this.el.style.cssText = `--d:${size}px`;
+    this.el.innerHTML = `<svg viewBox="0 0 200 200" class="tri-svg" aria-hidden="true"><defs>
+      <clipPath id="c${id}"><path d="${inner}"/></clipPath>
+      <linearGradient id="rim${id}" x1="0" y1="0" x2="1" y2="1"><stop offset="0" class="r0"/><stop offset=".45" class="r1"/><stop offset=".75" class="r2"/><stop offset="1" class="r3"/></linearGradient>
+      <linearGradient id="face${id}" x1="0" y1="0" x2="1" y2=".35"><stop offset="0" class="f0"/><stop offset=".55" class="f1"/><stop offset="1" class="f2"/></linearGradient>
+      <linearGradient id="ext${id}" x1="0" y1="0" x2="1" y2="1"><stop offset="0" class="e0"/><stop offset="1" class="e1"/></linearGradient>
+      <radialGradient id="gw${id}" cx="25%" cy="75%" r="95%"><stop offset="0" style="stop-color:var(--wl)"/><stop offset=".55" style="stop-color:var(--wm)"/><stop offset="1" style="stop-color:var(--wd)"/></radialGradient>
+      <linearGradient id="sp${id}" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#fff" stop-opacity=".55"/><stop offset=".25" stop-color="#fff" stop-opacity="0"/></linearGradient>
+      <linearGradient id="sh${id}" x1="0" y1="0" x2=".7" y2=".7"><stop offset="0" stop-color="#fff" stop-opacity=".75"/><stop offset=".35" stop-color="#fff" stop-opacity="0"/><stop offset=".8" stop-color="#fff" stop-opacity="0"/><stop offset="1" stop-color="#fff" stop-opacity=".35"/></linearGradient>
+      <mask id="m${id}"><rect width="200" height="200" fill="#000"/><g class="water" style="transform:translateY(200px)"><path class="w1" d="${WAVE}" fill="#fff"/></g></mask></defs>
+      <path class="t-shadow" d="${outer}" transform="translate(4 12)"/>
+      <g fill="url(#ext${id})">${ext}</g>
+      <path d="${outer} ${inner}" fill-rule="evenodd" fill="url(#rim${id})" class="t-rim"/>
+      <path d="${inner}" fill="url(#face${id})"/>
+      <g clip-path="url(#c${id})"><rect width="200" height="200" fill="url(#gw${id})" mask="url(#m${id})"/>
+        <g class="water" style="transform:translateY(200px)"><path class="wl" d="${WAVE_LINE}" fill="none" stroke="rgba(255,255,255,.55)" stroke-width="1.3"/></g>
+        <rect width="200" height="200" fill="url(#sp${id})"/></g>
+      <path d="${inner}" fill="none" class="t-in"/>
+      <path d="${tubeS}" fill="none" class="t-tubes"/><path d="${tube}" fill="none" class="t-tube"/>
+      <path d="${outer} ${inner}" fill-rule="evenodd" fill="url(#sh${id})"/>
+      <path d="${outer}" fill="none" class="t-out"/></svg>
+      <div class="tri-v"><b></b><i>수직</i></div><div class="tri-h"><b></b><i>앞뒤</i></div>`;
+    this.waters = [...this.el.querySelectorAll(".water")];
+    this.vb = this.el.querySelector(".tri-v b"); this.hb = this.el.querySelector(".tri-h b");
+    this.lv = -1;
+  }
+  /** 0~1: 안쪽 면 바닥(173)에서 꼭대기(약 45)까지 */
+  level(v) {
+    v = clamp(v, 0, 1); if (Math.abs(v - this.lv) < 0.002) return this;
+    this.lv = v;
+    const shown = v <= 0 ? -0.05 : Math.max(v, 0.045);
+    const t = `translateY(${173 - shown * 150 - 6}px)`;
+    this.waters.forEach(w => { w.style.transform = t; }); return this;
+  }
+  vals(vert, fore) { if (vert != null) this.vb.textContent = vert; if (fore != null) this.hb.textContent = fore; return this; }
+}
+
 const charts = {
   set: new Set(),
   redrawAll() { this.set.forEach(c => { if (c.c.isConnected) c.draw(); else c.destroy(); }); },
@@ -165,9 +222,24 @@ class Chart {
   }
   /** 그리는 범위 [처음, 끝] (표본 번호) */
   range() { const n = (this.o.values || []).length; return [0, Math.max(n - 1, 1)]; }
+  /** 등장 애니메이션 (2026-11-26 최적화): 매 프레임 그래프 전체를 다시 그리지 않는다.
+      바탕(축·격자)과 완성 그래프를 한 번씩 그려 두고, 완성본을 왼쪽부터 잘라 붙이기만 한다 */
   play() {
-    const t0 = performance.now(), dur = 1100;
-    const step = now => { this.prog = clamp((now - t0) / dur, 0, 1); this.draw(); if (this.prog < 1 && this.c.isConnected) requestAnimationFrame(step); };
+    const c = this.c, W = c.clientWidth; if (!W) { this.prog = 1; return; }
+    const snap = () => { const k = document.createElement("canvas"); k.width = c.width; k.height = c.height; k.getContext("2d").drawImage(c, 0, 0); return k; };
+    this.prog = 0; this.draw(); const bg = snap();
+    this.prog = 1; this.noMarks = true; this.draw(); this.noMarks = false; const full = snap();
+    const t0 = performance.now(), dur = 1100, sx = c.width / W, L = 44, pw = W - 12 - L;
+    this.prog = 0;
+    const step = now => {
+      if (!c.isConnected) return;
+      const p = clamp((now - t0) / dur, 0, 1);
+      if (p >= 1 || c.width !== full.width || c.height !== full.height) { this.prog = 1; this.draw(); return; }
+      const g = this.g, cut = Math.round((L + pw * p + 1) * sx);
+      g.setTransform(1, 0, 0, 1, 0, 0); g.clearRect(0, 0, c.width, c.height);
+      g.drawImage(bg, 0, 0); g.drawImage(full, 0, 0, cut, c.height, 0, 0, cut, c.height);
+      requestAnimationFrame(step);
+    };
     requestAnimationFrame(step);
   }
   setValues(v, offset) { this.o.values = v; this.o.offset = offset; this.draw(); }
@@ -188,7 +260,8 @@ class Chart {
   }
   draw() {
     const c = this.c, W = c.clientWidth, H = c.clientHeight; if (!W || !H) return;
-    const dpr = window.devicePixelRatio || 1;
+    // 화면 그래프는 2배 해상도까지만 (3배면 그리는 데 두 배 가까이 걸린다). 영상용(hiRes)은 기기 해상도 그대로
+    const dpr = this.o.hiRes ? (window.devicePixelRatio || 1) : Math.min(2, window.devicePixelRatio || 1);
     if (c.width !== Math.round(W * dpr) || c.height !== Math.round(H * dpr)) { c.width = Math.round(W * dpr); c.height = Math.round(H * dpr); }
     const g = this.g; g.setTransform(dpr, 0, 0, dpr, 0, 0); g.clearRect(0, 0, W, H);
     const o = this.o, v = o.values || [], n = v.length, rate = o.rate || FS;
@@ -264,7 +337,7 @@ class Chart {
     // 끝점 강조 (실시간)
     if (o.window && n) { const px = x(n - 1), py = y(v[n - 1]); g.fillStyle = o.color; g.beginPath(); g.arc(px, py, 3.5, 0, 7); g.fill(); }
     // 최고·최저 표시 (기록 그래프): 점 + 세로 지시선 + 값
-    if (o.marks && n > 1 && this.prog >= 1) {
+    if (o.marks && n > 1 && this.prog >= 1 && !this.noMarks) {
       let hi = 0, lo = 0;
       hi = lo = -1;
       for (let i = ia; i <= ib; i++) { if (!inSpan(i) || Number.isNaN(v[i])) continue; if (hi < 0 || v[i] > v[hi]) hi = i; if (lo < 0 || v[i] < v[lo]) lo = i; }
@@ -312,13 +385,19 @@ function signed(v, d) { const s = Math.abs(v).toFixed(d); return parseFloat(s) =
 function hexA(hex, a) { const h = hex.replace("#", ""); const n = parseInt(h.length === 3 ? h.split("").map(c => c + c).join("") : h, 16); return `rgba(${n >> 16 & 255},${n >> 8 & 255},${n & 255},${a})`; }
 function roundRect(g, x, y, w, h, r) { g.beginPath(); g.moveTo(x + r, y); g.arcTo(x + w, y, x + w, y + h, r); g.arcTo(x + w, y + h, x, y + h, r); g.arcTo(x, y + h, x, y, r); g.arcTo(x, y, x + w, y, r); g.closePath(); }
 
-const LIVE_MS = { acc: 1000 / 15, spd: 1000 / 30, lat: 2000, dacc: 1000 / 15, dspd: 1000 / 30, dlat: 2000 };
+const LIVE_MS = { chart: 1000 / 30, acc: 1000 / 15, spd: 1000 / 30, lat: 2000, dacc: 1000 / 15, dspd: 1000 / 30, dlat: 2000 };
 const SERIES = [
   { key: "acc", title: "가감속도", unit: "m/s²", dec: 2, half: 1.5, color: "#2C46BE" },
   { key: "jerk", title: "저크", unit: "m/s³", dec: 2, half: 1.0, color: "#D07A1F" },
   { key: "vibV", title: "상하 흔들림", unit: "gal", dec: 1, half: 30, color: "#1C8FA3" },
   { key: "vibL", title: "좌우 흔들림", unit: "gal", dec: 1, half: 30, color: "#94416A" },
   { key: "speed", title: "속력", unit: "m/min", dec: 1, half: 150, color: "#5D4A92" },
+];
+/* 경사형 기록의 앞뒤 그래프 (2026-11-26) */
+const SERIES_INC = [
+  { key: "fa", title: "앞뒤 가감속도", unit: "m/s²", dec: 2, half: 1.5, color: "#3B5BDB" },
+  { key: "vibF", title: "앞뒤 흔들림", unit: "gal", dec: 1, half: 30, color: "#B05C86" },
+  { key: "speedF", title: "앞뒤 속력", unit: "m/min", dec: 1, half: 150, color: "#6A4FB0" },
 ];
 
 /* ───────── 기록 저장소 (IndexedDB) ───────── */
@@ -327,7 +406,7 @@ function analysisOf(rec) {
   // 가속도 센서만으로 계산 (출발 직전 영점 + 전체 적분 + 정지 시점 되짚기)
   const k = rec.id + ":" + rec.vert.length + ":" + (rec.segs ? rec.segs.join(".") : "");
   if (!cache.has(k)) {
-    const A = Core.analyze(rec.vert, rec.lat, rec.rate, rec.segs);
+    const A = Core.analyze(rec.vert, rec.lat, rec.rate, rec.segs, rec.lon);
     cache.set(k, A);
   }
   return cache.get(k);
@@ -504,17 +583,22 @@ const ctl = {
     this.segs = [0]; this.distOff = 0;
     this.abn = this.mode === "auto" ? new Core.AbnormalDetector(cal, FS) : null;
     this.an = new Core.RideAnalyzer(FS);
-    this.vert = []; this.lat = [];
+    this.vert = []; this.lat = []; this.lon = [];
     this.live = { acc: [], jerk: [], vibV: [], vibL: [], speed: [] };
     this.o = null; this.startedAt = Date.now();
+    this.inclReset(true);
     this.lockScreen();
     home.render();
   },
   onMeasure(x, y, z) {
     if (this.abn) { const why = this.abn.push(x, y, z); if (why) return this.stop("abnormal"); }
-    const [v, l] = this.cal.project(x, y, z);
-    this.vert.push(v); this.lat.push(l);
+    const [v, l, h] = this.cal.project(x, y, z);
+    this.vert.push(v); this.lat.push(l); this.lon.push(h);
     const o = this.an.push(v, l);
+    // 경사형 엘리베이터: 가감속마다 3축 방향을 보고 감지·경사각 변화 판단, 감지 뒤에는 앞뒤 축을 따로 잰다
+    const ev = this.idet.push(v, l, h, this.an.v);
+    if (ev) this.onIncl(ev);
+    if (this.incl && this.idet.u) { const b = this.idet.b, u = this.idet.u; this.of = this.cF.push((l - b[1]) * u[0] + (h - b[2]) * u[1]); }
     const L = this.live;
     L.acc.push(o.acc); L.jerk.push(o.jerk); L.vibV.push(o.vibV); L.vibL.push(o.vibL); L.speed.push(o.speed);
     if (L.acc.length > LIVE_WIN * 2) for (const k in L) L[k].splice(0, LIVE_WIN);
@@ -527,7 +611,7 @@ const ctl = {
     const s0 = this.segs[this.segs.length - 1];
     const from = at == null ? this.vert.length : Math.min(at, this.vert.length);
     const n = Math.max(s0, from - CUT), drop = this.vert.length - n;
-    this.vert.length = n; this.lat.length = n;
+    this.vert.length = n; this.lat.length = n; this.lon.length = n;
     for (const k in this.live) this.live[k].splice(Math.max(0, this.live[k].length - drop), drop);
     if (n === s0 && this.segs.length > 1) this.segs.pop();     // 재개하자마자 멈췄으면 빈 구간은 없앤다
     this.phase = "pause";
@@ -538,7 +622,7 @@ const ctl = {
   /** 리셋 (2026-11-25): 엘리베이터가 서 있을 때 0.3초 이상 눌렀다 떼면, 지금까지 잰 것을 버리고 0.5초 보정 뒤 처음부터 다시 잰다 */
   reset() {
     if (this.state !== "measure" || this.phase !== "run") return;
-    this.vert = []; this.lat = []; this.segs = [0]; this.distOff = 0;
+    this.vert = []; this.lat = []; this.lon = []; this.segs = [0]; this.distOff = 0; this.inclReset(true);
     this.live = { acc: [], jerk: [], vibV: [], vibL: [], speed: [] };
     this.o = null; this.startedAt = Date.now();
     this.phase = "calib"; this.rb = []; this.recalP = 0;     // 재개와 같은 0.5초 보정 → 새 분석기로 시작
@@ -566,6 +650,7 @@ const ctl = {
     this.abn = this.mode === "auto" ? new Core.AbnormalDetector(this.cal, FS) : null;
     this.distOff += this.o ? this.o.dist : 0;
     this.an = new Core.RideAnalyzer(FS); this.o = null;
+    this.inclReset(false);                       // 새 보정 = 새 수평 축: 앞뒤 방향은 다시 찾고, 경사각은 이어서 비교
     if (this.vert.length > this.segs[this.segs.length - 1]) this.segs.push(this.vert.length);
     this.phase = "run"; this.rb = null;
     home.render();
@@ -585,7 +670,7 @@ const ctl = {
     if (n < FS) { toast("측정 시간이 너무 짧아 저장하지 않았어요."); return; }
     if (reason === "abnormal") { toast("비정상적인 흔들림이 감지되어 측정을 종료했어요.", 4200); try { navigator.vibrate && navigator.vibrate(60); } catch (e) { /* 무시 */ } }
     const rec = { id: `ride_${this.startedAt}_${Math.random().toString(36).slice(2, 6)}`, name: demo ? "데모 측정" : "", startedAt: this.startedAt, rate: FS, demo,
-      vert: Float32Array.from(this.vert.slice(0, n)), lat: Float32Array.from(this.lat.slice(0, n)), updatedAt: Date.now() };
+      vert: Float32Array.from(this.vert.slice(0, n)), lat: Float32Array.from(this.lat.slice(0, n)), lon: Float32Array.from(this.lon.slice(0, n)), updatedAt: Date.now() };
     if (segs.length > 1) rec.segs = segs;
     try { await store.put(rec); } catch (e) { toast("기록을 저장하지 못했어요."); }
     records.render();
@@ -593,6 +678,22 @@ const ctl = {
   },
   async lockScreen() { try { if ("wakeLock" in navigator) this.wake = await navigator.wakeLock.request("screen"); } catch (e) { this.wake = null; } },
   unlockScreen() { try { this.wake && this.wake.release(); } catch (e) { /* 무시 */ } this.wake = null; },
+  /** all: 새 측정(경사형 여부부터 다시) / 아니면 재개(경사각은 유지, 앞뒤 방향만 다시 찾기) */
+  inclReset(all) {
+    if (all) this.incl = null;
+    this.idet = new Core.InclineDetector(FS, this.incl ? this.incl.theta : null);
+    this.cF = new Core.AxisChannel(FS); this.of = null;
+  },
+  /** 경사형 감지 / 경사각 변화 (2026-11-26 사용자 확정): 반올림한 각도로 3도 이상 달라지면 변화 */
+  onIncl(ev) {
+    const t = Math.round(ev.theta);
+    if (!this.incl) { this.incl = { theta: ev.theta, deg: t, msg: { kind: "detect", at: performance.now() } }; home.render(); }
+    else if (ev.type === "change") {
+      this.incl.msg = { kind: "change", from: Math.round(ev.from), to: t, at: performance.now() };
+      this.incl.theta = ev.theta; this.incl.deg = t; home.inclMsg();
+    }
+    try { navigator.vibrate && navigator.vibrate(20); } catch (e) { /* 무시 */ }
+  },
 };
 
 /* ════════════════════════════════════════════════════════════════
@@ -602,11 +703,24 @@ const home = {
   detail: false, layout: "",
   render() {
     const st = ctl.state, measuring = st === "measure";
-    const want = measuring ? (this.detail ? "live-detail" : "live-simple") : "single";
+    const want = measuring ? (this.detail ? "live-detail" : ctl.incl ? "live-incl" : "live-simple") : "single";
     $("#livePill").hidden = !measuring;
     const held = measuring && ctl.phase !== "run";
     $("#livePill").classList.toggle("paused", held);
-    if (want !== this.layout) { this.layout = want; this.build(want); }
+    if (want !== this.layout) {
+      // 보정이 끝나 측정이 시작되면: 엘리베이터 문이 닫히고 사라진 뒤 게이지로 바꾼다
+      if (this.layout === "single" && want !== "single" && this.lift && !this.leaving) {
+        this.leaving = true;
+        const sg = $("#homeBody .single"), lf = this.lift;
+        if (sg) sg.classList.add("leaving");
+        lf.style.setProperty("--o", 0);                                  // 보정 끝: 문이 다 닫힘
+        setTimeout(() => lf.classList.add("gone"), 260);
+        setTimeout(() => { this.leaving = false; this.lift = null; this.render(); }, 660);
+        return;
+      }
+      if (this.leaving) return;
+      this.layout = want; this.build(want);
+    }
     $("#homeBody").classList.toggle("paused", held);
     this.updateSingle();
     this.renderActions();
@@ -614,12 +728,28 @@ const home = {
   },
   build(kind) {
     const body = $("#homeBody"); charts.clear(body); body.innerHTML = "";
-    this.big = this.trip = null; this.liveCharts = []; this.liveAt = {};
+    this.big = this.trip = this.lift = this.tris = null; this.liftOpen = false; clearTimeout(this.msgT); this.liveCharts = []; this.liveAt = {};
     if (kind === "single") {
       // 측정 대기·안정화: 원형 게이지 없이 글자만 화면 한가운데에 (2026-11-25 사용자 요청)
-      body.innerHTML = `<div class="single fade-in"><div class="cap-wrap" id="capWrap"><div class="caption" id="cap"></div><div class="sub" id="capSub"></div><div id="capBtns" class="home-actions"></div></div></div>`;
-      this.big = true; this.capDy = 0;
+      body.innerHTML = `<div class="single fade-in"><div class="cap-wrap" id="capWrap"><div class="lift" id="lift"><img src="assets/lift-frame.webp" alt=""><div class="clip"><img class="dl" src="assets/lift-leafL.webp" alt=""><img class="dr" src="assets/lift-leafR.webp" alt=""></div></div><div class="caption" id="cap"></div><div class="sub" id="capSub"></div><div id="capBtns" class="home-actions"></div></div></div>`;
+      this.big = true; this.capDy = 0; this.lift = $("#lift");
+      // 들어오면 문이 천천히 열리고, 그 뒤로는 보정 진행률만큼 닫힌다 (2026-11-26)
+      this.lift.classList.add("slow");
+      setTimeout(() => { if (this.lift) { this.liftOpen = true; this.updateSingle(); } }, 260);
+      setTimeout(() => this.lift && this.lift.classList.remove("slow"), 900);
       requestAnimationFrame(() => this.centerCaption());
+    } else if (kind === "live-incl") {
+      // 경사형 (2026-11-26 사용자 확정): 게이지를 모두 지우고 직각삼각형 게이지 3개. 세로 화면은 위아래로, 가로 화면은 옆으로 나란히
+      const wide = isWide();
+      const avail = innerHeight - 60 - 70 - 110 - 3 * 58;
+      const size = wide ? Math.round(clamp(Math.min(innerHeight - 300, (innerWidth - 220) / 3.9), 130, 300)) : Math.round(clamp(avail / 3, 96, 170));
+      body.innerHTML = `<div class="incl ${wide ? "row" : ""}"><div class="incl-msg" id="inclMsg"><div class="glass"><h3></h3><p></p><span class="pill"></span></div></div>
+        <div class="tris">${[["acc", "가감속도", "m/s²"], ["lat", "흔들림", "gal"], ["spd", "속력", "m/min"]].map(([k, t, u], i) =>
+          `<div class="item fade-in" style="animation-delay:${0.1 + i * 0.1}s"><div class="lbl">${t}<small>${u}</small></div><div class="g" id="tg-${k}"></div></div>`).join("")}</div></div>`;
+      this.tris = {}; this.liveAt = {};
+      for (const k of ["acc", "lat", "spd"]) { const g = new TriGauge(k, size); $(`#tg-${k}`).appendChild(g.el); g.vals("0.00", "0.00").level(0); this.tris[k] = g; }
+      this.tris.lat.vals("0.0", "0.0"); this.tris.spd.vals("0.0", "0.0");
+      this.inclMsg();
     } else if (kind === "live-simple") {
       const avail = innerHeight - 60 - 70 - 110 - 3 * 30;
       // 가로 화면: 세 게이지를 옆으로 나란히, 화면 높이에 맞춰 크게
@@ -635,7 +765,25 @@ const home = {
           <div class="stat glass"><div class="l">주행 거리</div><div class="v" id="lvD">0.0<small>m</small></div></div></div>
         <div class="charts">${SERIES.map((s, i) => `<div class="chart-card glass fade-in" style="animation-delay:${0.1 + i * 0.08}s"><div class="h"><b>${s.title}</b><span>${s.unit}</span><em id="lv-${s.key}"></em></div><canvas class="chart" id="lc-${s.key}"></canvas></div>`).join("")}</div>`;
       this.liveCharts = SERIES.map(s => new Chart($(`#lc-${s.key}`), { values: [], rate: FS, color: s.color, half: s.half, dec: s.dec, unit: s.unit, window: LIVE_WIN }));
+      // 화면 밖 그래프는 그리지 않는다
+      if (this.liveIO) this.liveIO.disconnect();
+      this.liveIO = new IntersectionObserver(es => es.forEach(e => { const ch = this.liveCharts.find(c => c.c === e.target); if (ch) ch.visible = e.isIntersecting; }));
+      this.liveCharts.forEach(ch => this.liveIO.observe(ch.c));
     }
+  },
+  /** 경사형 알림: '경사형 엘리베이터네요.' 또는 '경사각이 변화했어요.' + 알약. 3초 뒤 접힌다 (2026-11-26 사용자 확정) */
+  inclMsg() {
+    const box = $("#inclMsg"), I = ctl.incl; if (!box || !I || !I.msg) return;
+    const left = 3000 - (performance.now() - I.msg.at);
+    clearTimeout(this.msgT);
+    if (left <= 0) { box.classList.add("hide"); return; }
+    const ch = I.msg.kind === "change";
+    box.querySelector("h3").textContent = ch ? "경사각이 변화했어요." : "경사형 엘리베이터네요.";
+    box.querySelector("p").textContent = ch ? "" : "위아래와 함께 앞뒤로도 움직이고 있어요.";
+    box.querySelector("p").hidden = ch;
+    box.querySelector(".pill").textContent = ch ? `${I.msg.from}° → ${I.msg.to}°` : `경사 ${I.msg.to != null ? I.msg.to : I.deg}°`;
+    box.classList.remove("hide");
+    this.msgT = setTimeout(() => box.classList.add("hide"), left);
   },
   /** 대기 문구의 가운데를 화면 정가운데에 맞춘다 (위쪽 머리 높이만큼 내려가 있는 것을 끌어올림) */
   centerCaption() {
@@ -648,6 +796,7 @@ const home = {
     if (!this.big) return;
     const cap = $("#cap"), sub = $("#capSub"), btns = $("#capBtns");
     const settling = ctl.progress > 0.04;
+    if (this.lift && this.liftOpen) this.lift.style.setProperty("--o", (1 - clamp(ctl.progress, 0, 1)).toFixed(3));
     cap.textContent = settling ? "이제 측정을 시작할게요" : "측정 대기 중이에요";
     let subT = "", bt = "";
     if (ctl.sensorOk === false && !ctl.demo) { subT = "이 화면에서는 휴대폰 동작 센서를 쓸 수 없어요."; bt = `<button class="pill-btn" id="bDemo">${ICON.play}데모로 보기</button>`; }
@@ -722,7 +871,13 @@ const home = {
     if (!o) return;
     // 실시간 숫자 표시 주기 (2026-11-25 사용자 확정): 가감속 1초에 15번, 속력 1초에 30번, 좌우 흔들림 2초에 1번
     const now = performance.now(), due = k => { const lt = this.liveAt || (this.liveAt = {}); if (lt[k] != null && now - lt[k] < LIVE_MS[k]) return false; lt[k] = now; return true; };
-    if (this.trip) {
+    if (this.tris) {
+      // 경사형: 왼쪽 변 = 수직, 아래 변 = 앞뒤. 물 높이 = 경사 방향(합친) 값 / 범례 (가감속 0.6 m/s², 흔들림 20 gal, 속력 90 m/min)
+      const I = ctl.incl, rad = I.theta * Math.PI / 180, cot = 1 / Math.tan(rad), sn = Math.sin(rad), f = ctl.of, T = this.tris;
+      if (due("acc")) { const av = Math.abs(o.acc), af = f ? Math.abs(f.acc) : av * cot; T.acc.vals(av.toFixed(2), af.toFixed(2)).level(Math.hypot(av, af) / LEGEND_INC.acc); }
+      if (due("lat")) { const pv = o.ppV, pf = f ? f.pp : 0; T.lat.vals(pv.toFixed(1), f ? pf.toFixed(1) : "—").level(Math.max(pv, pf) / LEGEND_INC.lat); }
+      if (due("spd")) { const sv = Math.abs(o.speed); T.spd.vals(sv.toFixed(1), (sv * cot).toFixed(1)).level(sv / sn / LEGEND_INC.spd); }
+    } else if (this.trip) {
       if (due("acc")) this.trip.acc.level(Math.abs(o.acc) / LEGEND.acc).text(Math.abs(o.acc).toFixed(2), null, "m/s²");
       if (due("lat")) this.trip.lat.level(o.ppL / LEGEND.lat).text(o.ppL.toFixed(1), null, "gal");
       if (due("spd")) this.trip.spd.level(Math.abs(o.speed) / LEGEND.spd).text(Math.abs(o.speed).toFixed(1), null, "m/min");
@@ -731,8 +886,11 @@ const home = {
       $("#lvV").innerHTML = `${o.ppV.toFixed(1)}<small>gal</small>`;
       $("#lvD").innerHTML = `${(ctl.distOff + o.dist).toFixed(1)}<small>m</small>`;
       const n = ctl.live.acc.length, take = Math.min(n, LIVE_WIN), off = Math.max(0, ctl.vert.length - take) / FS;
+      // 실시간 그래프 (2026-11-26 최적화): 1초에 30번까지만, 화면에 보이는 그래프만 다시 그린다 (예전: 5개 모두 매 프레임 → 느린 폰에서 21프레임)
+      const redraw = due("chart");
       SERIES.forEach((s, i) => {
-        const arr = ctl.live[s.key]; this.liveCharts[i].setValues(arr.slice(arr.length - take), off);
+        const arr = ctl.live[s.key], ch = this.liveCharts[i];
+        if (redraw && ch.visible !== false) ch.setValues(arr.slice(arr.length - take), off);
         const k = s.key === "acc" ? "acc" : s.key === "speed" ? "spd" : s.key === "vibL" ? "lat" : null;
         if (k && !due("d" + k)) return;
         const cur = arr[arr.length - 1]; $(`#lv-${s.key}`).textContent = cur == null ? "" : signed(s.key === "speed" ? cur : cur, s.dec);
@@ -937,7 +1095,7 @@ const records = {
         const name = f.name.replace(/\.(csv|txt)$/i, "");
         const startedAt = imp.startedAt || f.lastModified || Date.now();
         const rec = { id: `ride_${startedAt}_${Math.random().toString(36).slice(2, 7)}`, name, startedAt, rate: imp.rate, imported: true,
-          vert: imp.vert, lat: imp.lat, updatedAt: Date.now(), src: { name: f.name, size: f.size }, srcKey };
+          vert: imp.vert, lat: imp.lat, ...(imp.lon ? { lon: imp.lon } : {}), updatedAt: Date.now(), src: { name: f.name, size: f.size }, srcKey };
         if (imp.segs) rec.segs = imp.segs;
         if (imp.zOnly) rec.zOnly = true;
         await store.put(rec); have.add(srcKey); ok++;
@@ -1039,7 +1197,36 @@ const detail = {
     await records.render();
     toast("기록을 삭제했어요.");
   },
+  /** 경사형 머리글: 경사각(바뀌었으면 처음 → 끝) · 수직/앞뒤 이동거리 */
+  inclHead(I) {
+    const ang = I.changes.length ? `경사 ${[I.theta, ...I.changes.map(c => c.to)].map(v => v + "°").join(" → ")}` : `경사 ${I.theta}°`;
+    return `<div class="incl-sec fade-in"><span class="tag">경사형 엘리베이터</span><span class="s">${ang} · 수직 ${I.distV.toFixed(1)} m · 앞뒤 ${I.distF.toFixed(1)} m</span></div>`;
+  },
+  /** 경사형 간단히: 직각삼각형 게이지 3개 (왼쪽 변 수직, 아래 변 앞뒤) */
+  simpleIncl(A) {
+    const m = A.m, ev = m.eval, I = m.incl, body = $("#dBody"), sn = Math.sin(I.theta * Math.PI / 180);
+    const worse = [ev.vibV, ev.vibF].filter(x => x && x.lv >= 0).sort((a, b) => b.lv - a.lv)[0] || { lv: -1, s: "기록이 없어요." };
+    const along = I.speedAlong != null ? I.speedAlong : m.speedMax / sn;
+    const rows = [
+      { k: "acc", lbl: "가감속도", u: "m/s²", v: Math.max(m.accMax, m.decMax).toFixed(2), f: Math.max(I.accMax, I.decMax).toFixed(2), lv: m.accPeak / sn / LEGEND_INC.acc,
+        b: { lv: "n", t: ev.acc.t }, p: `가속 최대 ${m.accMax.toFixed(2)} · ${I.accMax.toFixed(2)}, 감속 최대 ${m.decMax.toFixed(2)} · ${I.decMax.toFixed(2)} m/s² (수직 · 앞뒤)` },
+      { k: "lat", lbl: "흔들림", u: "gal", v: m.vibV && m.vibV.n ? m.vibV.p98.toFixed(1) : "—", f: I.vibF.n ? I.vibF.p98.toFixed(1) : "—",
+        lv: Math.max(m.vibV ? m.vibV.p98 : 0, I.vibF.p98) / LEGEND_INC.lat, b: { lv: worse.lv, t: worse.s }, p: [ev.vibV.line, ev.vibF && ev.vibF.line].filter(Boolean).join(" · ") },
+      { k: "spd", lbl: "속력", u: "m/min", v: m.speedMax.toFixed(1), f: I.speedMax.toFixed(1), lv: along / LEGEND_INC.spd,
+        b: { lv: "n", t: `경사 방향 ${along.toFixed(1)} m/min` }, p: I.changes.length ? "경사가 바뀌어 경사 방향 속력은 가장 빠를 때의 값이에요." : ev.speed.s ? `${ev.speed.s} 승강기` : "" },
+    ];
+    const size = isWide() ? Math.round(clamp(Math.min(innerHeight * 0.36, innerWidth / 5.6), 140, 250)) : Math.round(clamp(innerWidth * 0.33, 110, 140));
+    body.innerHTML = this.inclHead(I) + `<div class="d-rows incl-rows">${rows.map((r, i) => `<div class="d-row fade-in" style="animation-delay:${0.1 + i * 0.1}s">
+        <div><div class="lbl">${r.lbl} <small>${r.u}</small></div><div class="g" id="ds-${r.k}"></div></div>
+        <div class="ev"><b class="lv${r.b.lv}">${esc(r.b.t)}</b>${r.p ? `<p>${esc(r.p)}</p>` : ""}</div></div>`).join("")}</div>`;
+    rows.forEach((r, i) => {
+      const g = new TriGauge(r.k, size); $(`#ds-${r.k}`).appendChild(g.el);
+      g.vals(r.v, r.f).level(0);
+      setTimeout(() => g.level(Math.max(r.lv, r.v === "—" ? 0 : 0.03)), 250 + i * 150);
+    });
+  },
   simple(A) {
+    if (A.m.incl) return this.simpleIncl(A);
     const m = A.m, ev = m.eval, body = $("#dBody");
     const rows = [
       { k: "acc", lbl: "가감속도", lv: m.accPeak / LEGEND.acc, n1: m.accMax.toFixed(2), n2: m.decMax.toFixed(2), u: "m/s²",
@@ -1076,17 +1263,35 @@ const detail = {
       { l: "가감속 울렁임", ...gal(m.wave, ev.wave) },
       { l: "도착 거칠기", ...gal(m.arrive, ev.arrive) },
     ];
-    const series = SERIES.filter(s => s.key !== "vibL" || m.vibL);
-    const comment = { acc: ev.acc.s, jerk: ev.jerk.s, vibV: ev.vibV.s, vibL: ev.vibL ? ev.vibL.s : "", speed: ev.speed.s };
-    body.innerHTML = `<div class="m6">${cards.map((c, i) => `<div class="m6-card glass fade-in" style="animation-delay:${0.05 + i * 0.04}s">
+    const I = m.incl;
+    const series = SERIES.filter(s => s.key !== "vibL" || m.vibL).concat(I ? SERIES_INC : []);
+    const comment = { acc: ev.acc.s, jerk: ev.jerk.s, vibV: ev.vibV.s, vibL: ev.vibL ? ev.vibL.s : "", speed: ev.speed.s,
+      fa: I ? (ev.fa.a === ev.fa.d ? ev.fa.a : `${ev.fa.a}·${ev.fa.d}`) : "", vibF: ev.vibF ? ev.vibF.s : "", speedF: I && I.changes.length ? "경사 변화 있음" : "" };
+    const card = (c, i) => `<div class="m6-card glass fade-in" style="animation-delay:${0.05 + i * 0.04}s">
         <div class="l">${c.l}</div>
         ${c.v2 ? `<div class="v2">${c.v2.map(([k, v]) => `<div><span>${k}</span><b>${v}</b></div>`).join("")}</div><div class="u">${c.u}</div>`
                : `<div class="v">${c.v}<small>${c.u}</small></div>`}
-        <div class="e ${c.e2 ? "two" : ""} ${c.lv >= 0 ? "lv" + c.lv : ""}">${c.e2 ? c.e2.map(x => `<span>${esc(x)}</span>`).join("") : esc(c.e)}</div></div>`).join("")}</div>
+        <div class="e ${c.e2 ? "two" : ""} ${c.lv >= 0 ? "lv" + c.lv : ""}">${c.e2 ? c.e2.map(x => `<span>${esc(x)}</span>`).join("") : esc(c.e)}</div></div>`;
+    let inclHtml = "";
+    if (I) {
+      // 경사형 지표 (2026-11-26 사용자 확정): 경사도, 앞뒤 가감속도·속력·흔들림, 수직·앞뒤 이동거리
+      const sn = Math.sin(I.theta * Math.PI / 180), along = I.speedAlong != null ? I.speedAlong : m.speedMax / sn;
+      const slope = t => (t < 25 ? "완만한 편이에요" : t < 40 ? "보통 기울기예요" : "가파른 편이에요");
+      const ic = [
+        { l: "경사도", v: I.changes.length ? `${I.theta}→${I.thetaEnd}` : String(I.theta), u: "°", e: I.changes.length ? `운행 중 ${I.changes.length}번 바뀌었어요` : slope(I.theta), lv: -1 },
+        { l: "앞뒤 가감속도", v2: [["가속", I.accMax.toFixed(2)], ["감속", I.decMax.toFixed(2)]], u: "m/s²", e2: [`가속 ${ev.fa.a}`, `감속 ${ev.fa.d}`], lv: -1 },
+        { l: "앞뒤 속력", v: I.speedMax.toFixed(1), u: "m/min", e: `경사 방향 ${along.toFixed(1)} m/min`, lv: -1 },
+        { l: "앞뒤 흔들림", ...(I.vibF.n ? { v: I.vibF.p98.toFixed(1), u: "gal", e: ev.vibF.s, lv: ev.vibF.lv } : { v: "—", u: "", e: NO, lv: -1 }) },
+        { l: "수직 이동거리", v: I.distV.toFixed(1), u: "m", e: floors >= 1 ? `건물 약 ${floors}층 높이` : "거의 움직이지 않았어요", lv: -1 },
+        { l: "앞뒤 이동거리", v: I.distF.toFixed(1), u: "m", e: `경사 방향 ${I.distAlong.toFixed(1)} m`, lv: -1 },
+      ];
+      inclHtml = this.inclHead(I) + `<div class="m6">${ic.map(card).join("")}</div><div class="incl-sec fade-in"><span class="tag">기본 지표</span><span class="s">수직 방향</span></div>`;
+    }
+    body.innerHTML = `${inclHtml}<div class="m6">${cards.map((c, i) => card(c, i + (I ? 6 : 0))).join("")}</div>
       <div class="charts">${series.map((s, i) => `<div class="chart-card glass fade-in" style="animation-delay:${0.1 + i * 0.08}s">
         <div class="h"><b>${s.title}</b><span>${s.unit}</span><em>${esc(comment[s.key] || "")}</em></div>
         <canvas class="chart" id="dc-${s.key}" style="height:180px"></canvas></div>`).join("")}</div>`;
-    series.forEach(s => new Chart($(`#dc-${s.key}`), { values: S[s.key], rate: r.rate, color: s.color, half: s.half, dec: s.dec, unit: s.unit, animate: true, tap: true, marks: s.key === "speed" ? "peak" : true, spans: (s.key === "vibV" || s.key === "vibL") && A.m.cruise.length ? A.m.cruise : null, pauses: A.m.pauses }));
+    series.forEach(s => new Chart($(`#dc-${s.key}`), { values: S[s.key], rate: r.rate, color: s.color, half: s.half, dec: s.dec, unit: s.unit, animate: true, tap: true, marks: s.key === "speed" || s.key === "speedF" ? "peak" : true, spans: (s.key === "vibV" || s.key === "vibL" || s.key === "vibF") && A.m.cruise.length ? A.m.cruise : null, pauses: A.m.pauses }));
   },
 };
 

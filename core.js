@@ -115,10 +115,12 @@
       let px = 1 - this.gx * this.gx, py = -this.gx * this.gy, pz = -this.gx * this.gz, pn = Math.hypot(px, py, pz);
       if (pn < 0.5) { px = -this.gy * this.gx; py = 1 - this.gy * this.gy; pz = -this.gy * this.gz; pn = Math.hypot(px, py, pz); }
       this.lx = px / pn; this.ly = py / pn; this.lz = pz / pn;
+      // 수평 둘째 축 = 연직 × 좌우축 (경사형 엘리베이터의 앞뒤 방향을 찾으려고 함께 기록, 2026-11-26)
+      this.mx = this.gy * this.lz - this.gz * this.ly; this.my = this.gz * this.lx - this.gx * this.lz; this.mz = this.gx * this.ly - this.gy * this.lx;
     }
-    /** [연직 (위 +, 중력 제거), 좌우] m/s² */
+    /** [연직 (위 +, 중력 제거), 좌우, 수평 둘째 축] m/s² */
     project(x, y, z) {
-      return [x * this.gx + y * this.gy + z * this.gz - this.g, x * this.lx + y * this.ly + z * this.lz];
+      return [x * this.gx + y * this.gy + z * this.gz - this.g, x * this.lx + y * this.ly + z * this.lz, x * this.mx + y * this.my + z * this.mz];
     }
   }
 
@@ -232,6 +234,107 @@
       o.speed = this.v * 60; o.dist = this.dist; o.moving = this.moving;
       o.ppV = this.ppV.live(); o.ppL = Number.isNaN(vibL) ? NaN : this.ppL.live();
       return o;
+    }
+  }
+
+  /* ───────── 경사형 엘리베이터 (2026-11-26 사용자 확정) ─────────
+     경사형은 위아래와 함께 앞뒤로도 움직인다. 가속·감속 덩어리마다 3축 가속도(연직, 수평 두 축)가 주로 어느 방향으로 났는지
+     (주성분)를 구해, 그 방향이 수평에서 기운 각도를 경사각으로 본다.
+     · 수평 성분이 연직과 같은 때·같은 모양으로 움직여야 한다: 주성분이 전체 세기의 85% 이상
+     · 경사각 8~72° (그보다 서 있으면 일반 엘리베이터, 그보다 누우면 무빙워크)
+     · 60° 이하이고 아주 뚜렷하면(주성분 92% 이상) 첫 가감속에서 바로, 아니면 다음 가감속도 같은 각도(5° 안)일 때 감지
+       (일반 엘리베이터의 느린 좌우 출렁임이 우연히 가감속과 겹친 경우를 거르려고)
+     · 감속 뒤 다시 가속할 때마다 새로 구해, 2도 넘게 달라지면(반올림한 각도로 3도 이상) '경사각이 변화' */
+  const INC = { LP: 2.0, START: 0.07, END: 0.03, END_SEC: 0.15, MIN_SEC: 0.45, MIN_PEAK: 0.1, PCA: 0.85, MIN_DEG: 8, MAX_DEG: 72, SURE_DEG: 60, SURE_PCA: 0.92, AGREE: 5, CHANGE: 3 };
+  class InclineDetector {
+    /** prevTheta: 앞 구간(일시정지 전)에서 정한 경사각. 이 구간의 첫 감지를 그것과 비교한다 */
+    constructor(fs = FS, prevTheta = null) {
+      this.fs = fs; this.f = [0, 1, 2].map(() => Biquad.make(INC.LP, fs, false));
+      this.b = [0, 0, 0]; this.quiet = 0; this.lobe = null; this.i = 0;
+      this.theta = prevTheta; this.u = null; this.found = false;
+    }
+    /** v, h1, h2: m/s² (중력 제거, 연직·수평 두 축) · speed: 연직 속력 (m/s, 가속/감속 판정용)
+        @returns {null | {type:"detect"|"change", theta, from?, u, i0, i}} */
+    push(v, h1, h2, speed) {
+      const a = [this.f[0].process(v), this.f[1].process(h1), this.f[2].process(h2)];
+      const d = [a[0] - this.b[0], a[1] - this.b[1], a[2] - this.b[2]];
+      const mag = Math.hypot(d[0], d[1], d[2]);
+      let ev = null, L = this.lobe;
+      if (L) {
+        const dot = d[0] * L.m[0] + d[1] * L.m[1] + d[2] * L.m[2], mn = Math.hypot(L.m[0], L.m[1], L.m[2]);
+        if (mag > INC.START && dot < -0.5 * mag * mn) { ev = this.close(speed); L = null; }   // 방향이 뒤집힘 → 다음 덩어리
+      }
+      if (!L) {
+        if (mag < INC.END) {
+          this.quiet++;
+          if (this.quiet > 0.3 * this.fs) { const k = 1 / (0.5 * this.fs); for (let c = 0; c < 3; c++) this.b[c] += k * (a[c] - this.b[c]); }
+        } else this.quiet = 0;
+        if (mag > INC.START) {
+          L = this.lobe = { C: [0, 0, 0, 0, 0, 0], m: [0, 0, 0], n: 0, peak: 0, low: 0, v0: speed, i0: this.i };
+          this.quiet = 0;
+        }
+      }
+      if (L) {
+        const C = L.C;
+        C[0] += d[0] * d[0]; C[1] += d[0] * d[1]; C[2] += d[0] * d[2]; C[3] += d[1] * d[1]; C[4] += d[1] * d[2]; C[5] += d[2] * d[2];
+        L.m[0] += d[0]; L.m[1] += d[1]; L.m[2] += d[2]; L.n++; if (mag > L.peak) L.peak = mag;
+        L.low = mag < INC.END ? L.low + 1 : 0;
+        if (L.low >= INC.END_SEC * this.fs) { const e2 = this.close(speed); if (!ev) ev = e2; }
+      }
+      this.i++;
+      return ev;
+    }
+    /** 덩어리 하나를 닫고 경사 방향을 판단한다 */
+    close(speed) {
+      const L = this.lobe; this.lobe = null; if (!L) return null;
+      const r = InclineDetector.dir(L.C, L.m);
+      if (!r || L.n < INC.MIN_SEC * this.fs || L.peak < INC.MIN_PEAK || r.ratio < INC.PCA || r.theta < INC.MIN_DEG || r.theta > INC.MAX_DEG) return null;
+      const accel = Math.abs(speed) > Math.abs(L.v0) + 0.02;
+      const base = { theta: r.theta, u: r.u, i0: L.i0, i: this.i, accel };
+      if (!this.found) {
+        const sure = r.theta <= INC.SURE_DEG && r.ratio >= INC.SURE_PCA;
+        const agree = this.cand && Math.abs(this.cand.theta - r.theta) <= INC.AGREE;
+        if (!sure && !agree) { this.cand = r; return null; }
+        this.found = true; this.u = r.u;
+        if (this.theta != null && Math.abs(Math.round(r.theta) - Math.round(this.theta)) >= INC.CHANGE) {
+          const from = this.theta; this.theta = r.theta; return { type: "change", from, ...base };
+        }
+        if (this.theta == null) this.theta = r.theta;
+        return { type: "detect", ...base, theta: this.theta };
+      }
+      this.u = r.u;
+      if (accel && Math.abs(Math.round(r.theta) - Math.round(this.theta)) >= INC.CHANGE) {
+        const from = this.theta; this.theta = r.theta; return { type: "change", from, ...base };
+      }
+      return null;
+    }
+    /** 3×3 대칭 행렬(합)의 주성분: 경사각(°), 수평 앞 방향(올라갈 때 움직이는 쪽) 단위벡터, 주성분 비율 */
+    static dir(C, m) {
+      const M = [[C[0], C[1], C[2]], [C[1], C[3], C[4]], [C[2], C[4], C[5]]];
+      let e = m.slice(), n0 = Math.hypot(e[0], e[1], e[2]); if (!(n0 > 0)) return null;
+      e = e.map(x => x / n0);
+      for (let k = 0; k < 30; k++) {
+        const f = [0, 1, 2].map(r => M[r][0] * e[0] + M[r][1] * e[1] + M[r][2] * e[2]);
+        const fn = Math.hypot(f[0], f[1], f[2]); if (!(fn > 0)) return null;
+        e = f.map(x => x / fn);
+      }
+      const lam = [0, 1, 2].reduce((t, r) => t + e[r] * (M[r][0] * e[0] + M[r][1] * e[1] + M[r][2] * e[2]), 0);
+      const tr = C[0] + C[3] + C[5];
+      if (e[0] < 0) e = e.map(x => -x);
+      const hn = Math.hypot(e[1], e[2]);
+      return { theta: Math.atan2(e[0], hn) * 180 / Math.PI, u: hn > 0 ? [e[1] / hn, e[2] / hn] : [1, 0], ratio: tr > 0 ? lam / tr : 0 };
+    }
+  }
+  /** 앞뒤(또는 경사형의 좌우) 한 축: 가감속도·흔들림·실시간 p-p */
+  class AxisChannel {
+    /** hp: 흔들림 고역통과 (앞뒤는 가감속이 섞이므로 상하와 같은 P.VERT_HP, 좌우는 P.LAT_HP) */
+    constructor(fs = FS, hp = P.VERT_HP) {
+      this.lpAcc = Biquad.make(P.ACC_LP, fs, false); this.hp = Biquad.make(hp, fs, true); this.lp = Biquad.make(P.VIB_LP, fs, false);
+      this.pp = new PeakToPeak(fs); this.out = { acc: 0, vib: 0, pp: 0 };
+    }
+    push(x) {
+      const o = this.out; o.acc = this.lpAcc.process(x); o.vib = this.lp.process(this.hp.process(x)) * 100;
+      this.pp.push(o.vib); o.pp = this.pp.live(); return o;
     }
   }
 
@@ -390,7 +493,7 @@
     return out;
   }
 
-  function analyze(vert, lat, fs = FS, segs) {
+  function analyze(vert, lat, fs = FS, segs, lon) {
     const n = vert.length;
     // 좌우 값이 없거나 대부분 0이면(예: 상하만 기록하는 측정기에서 옮긴 파일) 좌우 흔들림은 '기록 없음'.
     // 실제 휴대폰 센서 값은 잡음 때문에 정확히 0이 거의 나오지 않는다
@@ -709,8 +812,78 @@
         m.speedShort = tripV.length > 0 && tripV.every(t => t.short || t.v == null) && tripV.some(t => t.short);   // 정격 속력에 닿기 전에 감속
       }
     }
+    if (hasLat && lon && lon.length === n) inclineInto({ vert, lat, lon, S, mot, moving, bounds, levMask, vMask, fs, m });
     m.eval = evaluate(m);
     return { series: S, m, spans: zupt.map(([a, r]) => [a, r]) };
+  }
+
+  /** 기록에서 경사형 엘리베이터 찾기 → m.incl 과 앞뒤 그래프(S.fa, S.vibF, S.speedF, S.distF).
+      경사형이면 좌우 흔들림은 앞뒤에 직각인 수평 방향으로 다시 잰다. */
+  function inclineInto({ vert, lat, lon, S, mot, moving, bounds, levMask, vMask, fs, m }) {
+    const n = vert.length, evs = [], segInfo = [];
+    let prev = null;
+    for (const [s, e] of bounds) {
+      const det = new InclineDetector(fs, prev), segEv = [];
+      for (let i = s; i < e; i++) { const ev = det.push(vert[i], lat[i], lon[i], S.speed[i] / 60); if (ev) segEv.push({ ...ev, i0: s + ev.i0, i: s + ev.i }); }
+      segInfo.push({ s, e, ev: segEv });
+      if (det.theta != null) prev = det.theta;
+      evs.push(...segEv);
+    }
+    if (!evs.length) return;
+    const theta0 = evs[0].type === "change" ? evs[0].from : evs[0].theta;
+    // 샘플마다 경사각 · 앞 방향 (첫 감지 전은 첫 값으로 채운다)
+    const th = new Float32Array(n), u1 = new Float32Array(n), u2 = new Float32Array(n), changes = [];
+    let curT = theta0;
+    for (const g of segInfo) {
+      let cu = g.ev.length ? g.ev[0].u : [1, 0], k = 0;
+      // 정지 상태의 수평 바이어스: 이 구간에서 서 있던 동안의 중앙값
+      const q1 = [], q2 = [];
+      for (let i = g.s; i < g.e; i++) if (!moving[i] && Math.abs(mot[i]) < P.DEAD) { q1.push(lat[i]); q2.push(lon[i]); }
+      g.b = [q1.length ? median(q1) : 0, q2.length ? median(q2) : 0];
+      for (let i = g.s; i < g.e; i++) {
+        while (k < g.ev.length && g.ev[k].i0 <= i) {
+          const ev = g.ev[k++]; cu = ev.u;
+          if (ev.type === "change") { changes.push({ t: ev.i0 / fs, from: Math.round(ev.from), to: Math.round(ev.theta) }); curT = ev.theta; }
+        }
+        th[i] = curT; u1[i] = cu[0]; u2[i] = cu[1];
+      }
+    }
+    const fa = new Float32Array(n), vibF = new Float32Array(n), vibL = new Float32Array(n), speedF = new Float32Array(n), distF = new Float32Array(n);
+    let dF = 0;
+    for (const g of segInfo) {
+      const cF = new AxisChannel(fs), cL = new AxisChannel(fs, P.LAT_HP);
+      for (let i = g.s; i < g.e; i++) {
+        const h1 = lat[i] - g.b[0], h2 = lon[i] - g.b[1];
+        const f = cF.push(h1 * u1[i] + h2 * u2[i]); fa[i] = f.acc; vibF[i] = f.vib;
+        vibL[i] = cL.push(-h1 * u2[i] + h2 * u1[i]).vib;
+        const cot = 1 / Math.tan(th[i] * Math.PI / 180);
+        speedF[i] = S.speed[i] * cot; dF += Math.abs(S.speed[i]) / 60 / fs * cot; distF[i] = dF;
+      }
+    }
+    S.fa = fa; S.vibF = vibF; S.vibL = vibL; S.speedF = speedF; S.distF = distF;
+    // 앞뒤 가속/감속: 앞뒤로 움직이는 방향 기준 (착상 제외)
+    let facc = 0, fdec = 0, fsp = 0, asp = 0;
+    for (let i = 0; i < n; i++) {
+      if (Math.abs(speedF[i]) > fsp) fsp = Math.abs(speedF[i]);
+      const al = Math.abs(S.speed[i]) / Math.sin(th[i] * Math.PI / 180); if (al > asp) asp = al;
+      if (levMask[i]) continue;
+      const v = speedF[i], a = fa[i];
+      if (Math.abs(v) > 1.5 || moving[i]) {
+        const dir = Math.abs(v) > 1.5 ? Math.sign(v) : Math.sign(a);
+        if (a * dir > 0) facc = Math.max(facc, Math.abs(a)); else fdec = Math.max(fdec, Math.abs(a));
+      }
+    }
+    const none = { a95: 0, p98: 0, max: 0, freq: 0, bumps: 0, spikes: 0, seconds: 0, n: 0 };
+    const tm = Math.round(theta0), cot0 = 1 / Math.tan(theta0 * Math.PI / 180), sin0 = Math.sin(theta0 * Math.PI / 180);
+    m.vibL = texture(vibL, vMask, fs) || none;
+    m.incl = {
+      theta: tm, thetaEnd: changes.length ? changes[changes.length - 1].to : tm, changes,
+      accMax: facc, decMax: fdec,
+      vibF: texture(vibF, vMask, fs) || none,
+      speedMax: changes.length ? fsp : m.speedMax * cot0,
+      speedAlong: changes.length ? asp : m.speedMax / sin0,
+      distV: m.distance, distF: dF, distAlong: Math.hypot(m.distance, dF),
+    };
   }
 
   /* ───────── 승차감 평가 지표 (2026-11-25 사용자 확정) ─────────
@@ -873,7 +1046,7 @@
        힘을 주는 시간 1.4초 이상 '슬며시', 0.55초 이하 '엣지 있게' / 힘을 빼는 시간 1.5초 이상 '슬며시', 0.5초 이하 '딱 끊어'
        흔들림의 결: 3 Hz 이하 출렁, 그 위 툭툭, 평소의 2.5배 넘게 한두 번만 튀면 '한 번 툭'
      속력: ~70 저속, ~130 중속, ~250 고속, ~500 초고속, 그 이상 '초고속의 초월' */
-  const EVAL_VER = 30;
+  const EVAL_VER = 31;
   const GRADE = ["아주 좋음", "좋음", "보통", "나쁨", "매우 나쁨"];
   const TH = { jerk: [0.8, 1.0, 1.4, 1.8], vib: [8, 10, 15, 20], wave: [15, 30, 45, 60], start: [20, 40, 60, 90], arrive: [20, 40, 60, 90], hit: [1, 2, 4, 8] };
   const DEC = { jerk: 2, vib: 1, wave: 0, start: 0, arrive: 0, hit: 1 };
@@ -1057,7 +1230,7 @@
     const f = k === "single" ? ` · 최대 ${t.max.toFixed(0)} gal` : k === "none" || !t.freq ? "" : ` · 약 ${t.freq.toFixed(1)} Hz`;
     return `${dir} ${pickBy(WORDS.feel[k], seed, vertical ? 1 : 2)}${f}`;
   }
-  function evaluate(m) {
+  function evaluateBase(m) {
     // 상하 흔들림: 세기(|98% 피크|)와 툭툭 빈도 중 나쁜 쪽. 문장은 세기만으로 고른다 (빈도는 드러내지 않음)
     const vibVa = m.vibV && m.vibV.n ? levelOf(m.vibV.p98, "vib") : null;
     const vibVh = m.vibV && m.vibV.seconds >= 5 ? levelOf(m.vibV.hitRate, "hit") : null;
@@ -1086,6 +1259,23 @@
         : m.speedRef ? { lv: 0, t: `${sg.t} (참고값)`, s: sg.s, card: `${m.speedMax <= 500 ? sg.s + " 승강기" : sg.s} · 참고값` }
         : { lv: 0, t: sg.t, s: sg.s },
     };
+  }
+
+  /** 경사형: 가감속 세기는 경사 방향(실제로 몸이 받는 방향)으로, 흔들림 말은 위아래·앞뒤로 */
+  function evaluate(m) {
+    const r = evaluateBase(m);
+    if (!m.incl || !(m.speedMax >= 3)) return r;
+    const I = m.incl, sn = Math.sin(I.theta * Math.PI / 180) || 1;
+    const mm = Object.assign({}, m, { accMax: m.accMax / sn, decMax: m.decMax / sn, accPeak: m.accPeak / sn, vibL: I.vibF, incl: null });
+    const e2 = evaluateBase(mm);
+    const turn = I.changes.length ? ` 운행 중에 경사가 ${I.changes.map(c => `${c.from}°에서 ${c.to}°로`).join(", 다시 ")} 바뀌어요.` : "";
+    const txt = e2.overall.replace(/좌우/g, "앞뒤");
+    const cut = txt.indexOf(". ");
+    r.overall = cut > 0 ? `${txt.slice(0, cut + 1)} 경사 ${I.theta}°로 오르내리는 경사형이에요.${turn} ${txt.slice(cut + 2)}` : `경사 ${I.theta}°로 오르내리는 경사형이에요.${turn} ${txt}`;
+    r.level = e2.level; r.acc = e2.acc;
+    r.vibF = e2.vibL ? { ...e2.vibL, line: (e2.vibL.line || "").replace("좌우로", "앞뒤로") } : null;
+    r.fa = { a: accLv(I.accMax)[1], d: accLv(I.decMax)[1] };
+    return r;
   }
 
   const clamp01 = v => (v < 0 ? 0 : v > 1 ? 1 : v);
@@ -1125,16 +1315,18 @@
   /** CSV → {vert, lat|null, rate, startedAt?, info}. A4~: 시간, B4~: 수직, E4~: 수평 */
   function importCsv(text) {
     const rows = parseCsv(text);
-    const t = [], b = [], e = [], sg = [];
+    const t = [], b = [], e = [], sg = [], lo = [];
     let hasE = false;
     // elMotion에서 내보낸 파일의 일시정지 구간 번호 (segment 열)
     const segCol = (rows[2] || []).findIndex(c => String(c).trim() === "segment");
+    // 수평 둘째 축 (경사형 엘리베이터 판단용, 2026-11-26)
+    const lonCol = (rows[2] || []).findIndex(c => String(c).trim() === "lon_accel_m_s2");
     for (let r = 3; r < rows.length; r++) {
       const row = rows[r];
       const tv = num(row[0]), bv = num(row[1]);
       if (Number.isNaN(tv) || Number.isNaN(bv)) continue;
       const ev = num(row[4]);
-      t.push(tv); b.push(bv); e.push(ev); if (segCol >= 0) sg.push(num(row[segCol]));
+      t.push(tv); b.push(bv); e.push(ev); if (segCol >= 0) sg.push(num(row[segCol])); if (lonCol >= 0) lo.push(num(row[lonCol]));
       if (!Number.isNaN(ev)) hasE = true;
     }
     if (b.length < 10) throw new Error("A4·B4 아래에 숫자 데이터가 부족해요");
@@ -1174,7 +1366,8 @@
       for (let k = 1; k < sg.length; k++) if (sg[k] !== sg[k - 1] && !Number.isNaN(sg[k])) st.push(Math.round(ts[k] * FS));
       if (st.length > 1) segs = st;
     }
-    return { vert: vN.data, lat: lN ? lN.data : null, rate: FS, startedAt, segs, info: { srcRate, vertUnit: vN.unit, latUnit: lN ? lN.unit : null } };
+    const lon = lN && lo.length === t.length && lo.some(v => !Number.isNaN(v)) ? Float32Array.from(interp(lo.map(v => (Number.isNaN(v) ? 0 : v)))) : null;
+    return { vert: vN.data, lat: lN ? lN.data : null, lon, rate: FS, startedAt, segs, info: { srcRate, vertUnit: vN.unit, latUnit: lN ? lN.unit : null } };
   }
 
   /** 상하 가속도만 있는 .txt (LiftTest 형식: 첫 줄 'Time  Acceleration', 그 아래 '초  m/s²' 두 열, 중력 제거됨).
@@ -1214,12 +1407,12 @@
     const lines = [
       `# name,"${(rec.name || "").replace(/"/g, '""')}"`,
       `# started_at,${when},sample_rate_hz,${rec.rate}`,
-      "time_s,vertical_accel_m_s2,accel_m_s2,jerk_m_s3,lateral_accel_m_s2,vertical_vib_gal,lateral_vib_gal,speed_m_min,distance_m,segment",
+      "time_s,vertical_accel_m_s2,accel_m_s2,jerk_m_s3,lateral_accel_m_s2,vertical_vib_gal,lateral_vib_gal,speed_m_min,distance_m,segment,lon_accel_m_s2",
     ];
     const bd = segBounds(n, rec.segs);
     for (let k = 0; k < bd.length; k++) for (let i = bd[k][0]; i < bd[k][1]; i++) {
       lines.push([(i / rec.rate).toFixed(4), f(rec.vert[i]), f(S.acc[i]), f(S.jerk[i]),
-        rec.lat ? f(rec.lat[i]) : "", f(S.vibV[i], 2), rec.lat ? f(S.vibL[i], 2) : "", f(S.speed[i], 2), f(S.dist[i], 3), k + 1].join(","));
+        rec.lat ? f(rec.lat[i]) : "", f(S.vibV[i], 2), rec.lat ? f(S.vibL[i], 2) : "", f(S.speed[i], 2), f(S.dist[i], 3), k + 1, rec.lon ? f(rec.lon[i]) : ""].join(","));
     }
     return lines.join("\n") + "\n";
   }
@@ -1284,7 +1477,7 @@
   }
 
   const Core = {
-    FS, P, Biquad, Resampler, StabilityDetector, Calibration, AbnormalDetector, PeakToPeak, RideAnalyzer,
+    FS, P, Biquad, Resampler, StabilityDetector, Calibration, AbnormalDetector, PeakToPeak, RideAnalyzer, InclineDetector, AxisChannel, INC,
     analyze, segBounds, accLv, evaluate, aiText, vibKind, GRADE, TH, WORDS, _dbg: { zp, texture, rideQuality }, EVAL_VER, ppStats, percentile, parseCsv, importCsv, importTxt, TXT_BAD, exportCsv, DemoSignal,
   };
   if (typeof module !== "undefined" && module.exports) module.exports = Core;
