@@ -4,7 +4,7 @@
 /* ───────── 상수 ───────── */
 const FS = Core.FS;
 /* 앱 버전 (2026-11-25 사용자 확정): 0.큰 기능 묶음.고친 횟수 — 웹 앱 확정 때 1.0.0, 안드로이드 앱 때 2.0.0 */
-const APP_VERSION = "0.13.9";
+const APP_VERSION = "0.13.10";
 const LEGEND = { acc: 1.5, lat: 30, latA: 20, spd: 600 };
 const LEGEND_INC = { acc: 1.0, lat: 80, spd: 90 };   // 경사형 게이지 범례 (2026-11-26 사용자 확정): 가감속 1.0 m/s², 흔들림 80 gal, 속력 90 m/min   // 물 높이 범례 (화면에 표시하지 않음). lat: 실시간 p-p, latA: 기록의 |98% 피크|
 const CUT = Math.round(Core.P.CUT_SEC * FS);
@@ -574,7 +574,7 @@ const ctl = {
     // 경사형 데모는 실측 기록(경사형 상행 Up2, 2026-11-26)을 재생. 못 읽으면 합성 신호로
     let rec = null;
     if (incline) {
-      try { rec = await (this.inclRec || (this.inclRec = fetch("assets/demo-incline.bin").then(r => (r.ok ? r.arrayBuffer() : Promise.reject())).then(b => new Int16Array(b)))); }
+      try { rec = await (this.inclRec || (this.inclRec = fetch("assets/demo-incline.txt").then(r => (r.ok ? r.text() : Promise.reject())).then(t => { const s = atob(t.trim()), u = new Uint8Array(s.length); for (let i = 0; i < s.length; i++) u[i] = s.charCodeAt(i); return new Int16Array(u.buffer); }))); }
       catch (e) { this.inclRec = null; }
       if (this.state === "measure") return;
     }
