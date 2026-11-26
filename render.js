@@ -365,7 +365,7 @@ const videoMaker = (() => {
     const I = m.incl, TRI = !!I;
     if (I) {
       const sn = Math.sin(I.theta * Math.PI / 180), along = I.speedAlong != null ? I.speedAlong : m.speedMax / sn;
-      const worse = [ev.vibV, ev.vibF].filter(x => x && x.lv >= 0).sort((a, b) => b.lv - a.lv)[0] || { lv: -1, s: "기록이 없어요." };
+      const worse = [ev.vibV, ev.vibF, ev.vibL].filter(x => x && x.lv >= 0).sort((a, b) => b.lv - a.lv)[0] || { lv: -1, s: "기록이 없어요." };
       gauges[0].lbl = "가감속도"; gauges[0].lv = m.accPeak / sn / LEGEND_INC.acc; gauges[0].a = Math.max(m.accMax, m.decMax).toFixed(2); gauges[0].bv = Math.max(I.accMax, I.decMax).toFixed(2);
       gauges[1].lbl = "흔들림"; gauges[1].lv = Math.max(m.vibV ? m.vibV.p98 : 0, I.vibF.p98) / LEGEND_INC.lat;
       gauges[1].a = m.vibV && m.vibV.n ? m.vibV.p98.toFixed(1) : "—"; gauges[1].bv = I.vibF.n ? I.vibF.p98.toFixed(1) : "—";

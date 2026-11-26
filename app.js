@@ -4,9 +4,9 @@
 /* ───────── 상수 ───────── */
 const FS = Core.FS;
 /* 앱 버전 (2026-11-25 사용자 확정): 0.큰 기능 묶음.고친 횟수 — 웹 앱 확정 때 1.0.0, 안드로이드 앱 때 2.0.0 */
-const APP_VERSION = "0.13.8";
+const APP_VERSION = "0.13.9";
 const LEGEND = { acc: 1.5, lat: 30, latA: 20, spd: 600 };
-const LEGEND_INC = { acc: 0.6, lat: 20, spd: 90 };   // 경사형 게이지 범례 (2026-11-26): 경사형은 60 m/min 이하라 속력 90, 가감속·흔들림은 측정 자료 기준   // 물 높이 범례 (화면에 표시하지 않음). lat: 실시간 p-p, latA: 기록의 |98% 피크|
+const LEGEND_INC = { acc: 1.0, lat: 80, spd: 90 };   // 경사형 게이지 범례 (2026-11-26 사용자 확정): 가감속 1.0 m/s², 흔들림 80 gal, 속력 90 m/min   // 물 높이 범례 (화면에 표시하지 않음). lat: 실시간 p-p, latA: 기록의 |98% 피크|
 const CUT = Math.round(Core.P.CUT_SEC * FS);
 const CUT_MANUAL = Math.round(0.3 * FS);   // 수동 모드 종료 시 버려지는 마지막 0.3초
 const HOLD_MS = 300;                       // 측정 재개: 이만큼 길게 눌러야 한다
@@ -569,11 +569,18 @@ const ctl = {
     setTimeout(() => { if (!this.gotEvent && (!this.needPermission || inPreview())) { this.sensorOk = false; home.render(); } }, 2500);
   },
   /** incline: 경사형 엘리베이터 데모 (설정 → 데모 측정, 2026-11-26) */
-  startDemo(incline) {
+  async startDemo(incline) {
     if (this.state === "measure") { toast("측정 중에는 데모를 시작할 수 없어요."); return; }
+    // 경사형 데모는 실측 기록(경사형 상행 Up2, 2026-11-26)을 재생. 못 읽으면 합성 신호로
+    let rec = null;
+    if (incline) {
+      try { rec = await (this.inclRec || (this.inclRec = fetch("assets/demo-incline.bin").then(r => (r.ok ? r.arrayBuffer() : Promise.reject())).then(b => new Int16Array(b)))); }
+      catch (e) { this.inclRec = null; }
+      if (this.state === "measure") return;
+    }
     this.stopDemo();
     this.res.reset(); this.stab.reset(); this.needDisturb = false;
-    const sig = new Core.DemoSignal({ incline }), t0 = performance.now();
+    const sig = new Core.DemoSignal({ incline, rec }), t0 = performance.now();
     let i = 0;
     this.demo = setInterval(() => {
       const target = Math.floor((performance.now() - t0) / 10);
@@ -621,6 +628,11 @@ const ctl = {
     // 경사형 엘리베이터: 가감속마다 3축 방향을 보고 감지·경사각 변화 판단, 감지 뒤에는 앞뒤 축을 따로 잰다
     const ev = this.idet.push(v, l, h, this.an.v);
     if (ev) this.onIncl(ev);
+    // 추정 경사각은 1초에 한 번 알약·게이지에 (2026-11-26 사용자 확정)
+    if (this.incl && this.idet.est != null && this.vert.length % FS === 0) {
+      const d = Math.round(this.idet.est);
+      if (d !== this.incl.deg) { this.incl.theta = this.idet.est; this.incl.deg = d; const ip = $("#inclPill"); if (ip) ip.textContent = `경사 ${d}°`; }
+    }
     if (this.incl && this.idet.u) { const b = this.idet.b, u = this.idet.u; this.of = this.cF.push((l - b[1]) * u[0] + (h - b[2]) * u[1]); }
     const L = this.live;
     L.acc.push(o.acc); L.jerk.push(o.jerk); L.vibV.push(o.vibV); L.vibL.push(o.vibL); L.speed.push(o.speed);
@@ -707,7 +719,7 @@ const ctl = {
     this.idet = new Core.InclineDetector(FS, this.incl ? this.incl.theta : null);
     this.cF = new Core.AxisChannel(FS); this.of = null;
   },
-  /** 경사형 감지 / 경사각 변화 (2026-11-26 사용자 확정): 반올림한 각도로 3도 이상 달라지면 변화 */
+  /** 경사형 감지 / 경사각 변화 (2026-11-26 사용자 확정): 반올림한 각도로 2도 이상 달라지면 변화 */
   onIncl(ev) {
     const t = Math.round(ev.theta);
     if (!this.incl) { this.incl = { theta: ev.theta, deg: t, msg: { kind: "detect", at: performance.now() } }; home.render(); }
@@ -1239,7 +1251,7 @@ const detail = {
   /** 경사형 간단히: 직각삼각형 게이지 3개 (왼쪽 변 수직, 아래 변 앞뒤) */
   simpleIncl(A) {
     const m = A.m, ev = m.eval, I = m.incl, body = $("#dBody"), sn = Math.sin(I.theta * Math.PI / 180);
-    const worse = [ev.vibV, ev.vibF].filter(x => x && x.lv >= 0).sort((a, b) => b.lv - a.lv)[0] || { lv: -1, s: "기록이 없어요." };
+    const worse = [ev.vibV, ev.vibF, ev.vibL].filter(x => x && x.lv >= 0).sort((a, b) => b.lv - a.lv)[0] || { lv: -1, s: "기록이 없어요." };
     const along = I.speedAlong != null ? I.speedAlong : m.speedMax / sn;
     const rows = [
       { k: "acc", lbl: "가감속도", u: "m/s²", v: Math.max(m.accMax, m.decMax).toFixed(2), f: Math.max(I.accMax, I.decMax).toFixed(2), lv: m.accPeak / sn / LEGEND_INC.acc,

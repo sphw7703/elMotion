@@ -237,80 +237,99 @@
     }
   }
 
-  /* ───────── 경사형 엘리베이터 (2026-11-26 사용자 확정) ─────────
-     경사형은 위아래와 함께 앞뒤로도 움직인다. 가속·감속 덩어리마다 3축 가속도(연직, 수평 두 축)가 주로 어느 방향으로 났는지
+  /* ───────── 경사형 엘리베이터 (2026-11-26 사용자 확정, 실측 경사형 8회로 다듬음) ─────────
+     경사형은 위아래와 함께 앞뒤로도 움직인다. 가감속 펄스마다 3축 가속도(연직, 수평 두 축)가 주로 어느 방향으로 났는지
      (주성분)를 구해, 그 방향이 수평에서 기운 각도를 경사각으로 본다.
-     · 수평 성분이 연직과 같은 때·같은 모양으로 움직여야 한다: 주성분이 전체 세기의 85% 이상
-     · 경사각 8~72° (그보다 서 있으면 일반 엘리베이터, 그보다 누우면 무빙워크)
-     · 60° 이하이고 아주 뚜렷하면(주성분 92% 이상) 첫 가감속에서 바로, 아니면 다음 가감속도 같은 각도(5° 안)일 때 감지
-       (일반 엘리베이터의 느린 좌우 출렁임이 우연히 가감속과 겹친 경우를 거르려고)
-     · 감속 뒤 다시 가속할 때마다 새로 구해, 2도 넘게 달라지면(반올림한 각도로 3도 이상) '경사각이 변화' */
-  const INC = { LP: 2.0, START: 0.07, END: 0.03, END_SEC: 0.15, MIN_SEC: 0.45, MIN_PEAK: 0.1, PCA: 0.85, MIN_DEG: 8, MAX_DEG: 72, SURE_DEG: 60, SURE_PCA: 0.92, AGREE: 5, CHANGE: 3 };
+     · 펄스: 연직 0.5 Hz 저역이 기준선에서 0.025 m/s² 넘게 1~6초(넘으면 거기서 닫음), 연직 속도 변화 0.05 m/s 이상. 펄스 직전 1초 평균을 기준으로 뺀다
+       (카 기울기로 수평축에 섞이는 중력이 천천히 바뀌어도 펄스 동안만 보면 거의 그대로라서)
+     · 주성분이 전체 세기의 80% 이상, 경사각 8~72° (그보다 서 있으면 일반 엘리베이터, 그보다 누우면 무빙워크)
+     · 60° 이하이고 아주 뚜렷하면(주성분 92% 이상) 첫 펄스에서 바로, 아니면 다음 펄스도 같은 각도(5° 안)일 때 감지
+     · 가속 펄스마다 새 구간. 감속 펄스는 같은 구간에 더해 평균. 반올림한 각도로 2도 이상 달라지면 '경사각이 변화'
+     · 실시간 추정(est): 펄스가 이어지는 동안 1초마다 그때까지의 주성분으로 */
+  const INC = { LP: 2.0, END: 0.03, PCA: 0.85, MIN_DEG: 8, MAX_DEG: 72, SURE_DEG: 60, SURE_PCA: 0.92, AGREE: 5, CHANGE: 2,
+    Z_LP: 0.5, Z_ON: 0.025, Z_QUIET: 0.015, P_MIN_SEC: 1.0, P_END_SEC: 0.3, P_PCA: 0.8, P_DV: 0.05, P_MAX_SEC: 6 };   // P_DV: 펄스의 연직 속도 변화(m/s) 하한 (실측 0.07~0.33), P_MAX_SEC: 이보다 길면 거기서 닫음 (실측 펄스 3~6초)
   class InclineDetector {
     /** prevTheta: 앞 구간(일시정지 전)에서 정한 경사각. 이 구간의 첫 감지를 그것과 비교한다 */
     constructor(fs = FS, prevTheta = null) {
       this.fs = fs; this.f = [0, 1, 2].map(() => Biquad.make(INC.LP, fs, false));
-      this.b = [0, 0, 0]; this.quiet = 0; this.lobe = null; this.i = 0;
-      this.theta = prevTheta; this.u = null; this.found = false; this.vel = 0;
+      this.b = [0, 0, 0]; this.quiet = 0; this.i = 0;
+      this.theta = prevTheta; this.u = null; this.found = false; this.est = prevTheta;
+      // 경사각 추정 펄스 (연직 저역 기준)
+      this.zf = Biquad.make(INC.Z_LP, fs, false); this.zb = null; this.ring = []; this.pl = null;
+      this.secN = 0; this.secSum = 0; this.dir = 0;   // 앞 구간 경사각(prevTheta)은 이 구간 첫 감지와 비교만
+    }
+    /** 펄스 하나를 닫고 경사각을 구한다. 가속 펄스면 새 구간 시작(경사각 변화 판단), 감속 펄스면 같은 구간에 더해 다듬는다 */
+    closePulse() {
+      const p = this.pl; this.pl = null;
+      if (p.n < INC.P_MIN_SEC * this.fs) return null;
+      // 가속/감속: 첫 뚜렷한 펄스의 부호를 진행 방향으로 보고, 같은 부호면 가속·반대면 감속 (출발 → 감속 → 재가속 → 감속)
+      //   (연직 속도를 쌓아 판단하면 실측 잡음에 흔들려서 2026-11-26 바꿈)
+      const dv = p.m[0] / this.fs;
+      if (!this.dir && Math.abs(dv) >= INC.P_DV / 2) this.dir = Math.sign(dv);   // 첫 출발은 연직 성분이 약하게 잡히기도 해서 하한의 절반으로
+      if (Math.abs(dv) < INC.P_DV) return null;
+      const accel = Math.sign(dv) === this.dir;
+      const r = InclineDetector.dir(p.C, p.m);
+      if (!r || r.ratio < INC.P_PCA || r.theta < INC.MIN_DEG || r.theta > INC.MAX_DEG) return null;
+      let ev = null;
+      if (!this.found) {
+        const sure = r.theta <= INC.SURE_DEG && r.ratio >= INC.SURE_PCA, agree = this.cand && Math.abs(this.cand.theta - r.theta) <= INC.AGREE;
+        if (!sure && !agree) { this.cand = r; return null; }
+        this.found = true; this.u = r.u; this.est = r.theta;
+        // 같은 구간의 앞 펄스(후보)와 평균
+        if (agree && !sure) { this.secN = 2; this.secSum = this.cand.theta + r.theta; } else if (!this.secN || accel) { this.secN = 1; this.secSum = r.theta; } else { this.secN++; this.secSum += r.theta; }
+        const prev = this.theta; this.theta = this.secSum / this.secN;
+        if (prev != null && Math.abs(Math.round(this.theta) - Math.round(prev)) >= INC.CHANGE) return { type: "change", from: prev, theta: this.theta, u: r.u, i0: p.i0, i: this.i, accel };
+        return { type: "detect", theta: this.theta, u: r.u, i0: p.i0, i: this.i, accel };
+      }
+      this.est = r.theta; this.u = r.u;
+      if (accel) {
+        if (this.found && this.secN && Math.abs(Math.round(r.theta) - Math.round(this.theta)) >= INC.CHANGE) ev = { type: "change", from: this.theta, theta: r.theta, u: r.u, i0: p.i0, i: this.i, accel };
+        this.secN = 1; this.secSum = r.theta;
+      } else { this.secN++; this.secSum += r.theta; }
+      this.theta = this.secSum / this.secN;
+      return ev;
+    }
+    /** 연직 저역으로 펄스를 잡고, 펄스 동안 3축 공분산을 모은다. 1초마다 실시간 추정(est) */
+    pulse(v, a) {
+      const zl = this.zf.process(v);
+      if (this.zb == null) this.zb = zl;
+      this.ring.push(a); if (this.ring.length > this.fs) this.ring.shift();
+      const dz = zl - this.zb; let ev = null;
+      if (!this.pl) {
+        if (Math.abs(dz) < INC.Z_QUIET) this.zb += (zl - this.zb) / this.fs;
+        if (Math.abs(dz) > INC.Z_ON && this.ring.length >= 0.5 * this.fs) {
+          const pre = [0, 1, 2].map(c => this.ring.reduce((t, x) => t + x[c], 0) / this.ring.length);
+          this.pl = { pre, C: [0, 0, 0, 0, 0, 0], m: [0, 0, 0], n: 0, sg: Math.sign(dz), low: 0, i0: this.i };
+        }
+      }
+      const p = this.pl;
+      if (p) {
+        const d = [a[0] - p.pre[0], a[1] - p.pre[1], a[2] - p.pre[2]], C = p.C;
+        C[0] += d[0] * d[0]; C[1] += d[0] * d[1]; C[2] += d[0] * d[2]; C[3] += d[1] * d[1]; C[4] += d[1] * d[2]; C[5] += d[2] * d[2];
+        p.m[0] += d[0]; p.m[1] += d[1]; p.m[2] += d[2]; p.n++;
+        p.low = Math.sign(dz) !== p.sg || Math.abs(dz) < INC.Z_ON ? p.low + 1 : 0;
+        if (this.found && p.n >= INC.P_MIN_SEC * this.fs && p.n % Math.round(this.fs) === 0) {
+          const r = InclineDetector.dir(C, p.m);
+          if (r && r.ratio >= INC.P_PCA && r.theta >= INC.MIN_DEG && r.theta <= INC.MAX_DEG) this.est = r.theta;
+        }
+        if (p.n > INC.P_MAX_SEC * this.fs) { ev = this.closePulse(); this.zb = zl; }   // 너무 길면 여기서 닫고 기준선을 다시 잡는다 (펄스 뒤 기준선이 옮겨 간 경우)
+        else if (p.low >= INC.P_END_SEC * this.fs) ev = this.closePulse();
+      }
+      return ev;
     }
     /** v, h1, h2: m/s² (중력 제거, 연직·수평 두 축) · speed: 연직 속력 (m/s, 가속/감속 판정용)
         @returns {null | {type:"detect"|"change", theta, from?, u, i0, i}} */
     push(v, h1, h2, speed) {
       const a = [this.f[0].process(v), this.f[1].process(h1), this.f[2].process(h2)];
+      // 정지·정속(조용할 때)의 기준선: 앞뒤 흔들림 채널이 쓴다
       const d = [a[0] - this.b[0], a[1] - this.b[1], a[2] - this.b[2]];
-      const mag = Math.hypot(d[0], d[1], d[2]);
-      let ev = null, L = this.lobe;
-      if (L) {
-        const dot = d[0] * L.m[0] + d[1] * L.m[1] + d[2] * L.m[2], mn = Math.hypot(L.m[0], L.m[1], L.m[2]);
-        if (mag > INC.START && dot < -0.5 * mag * mn) { ev = this.close(speed); L = null; }   // 방향이 뒤집힘 → 다음 덩어리
-      }
-      if (!L) {
-        if (mag < INC.END) {
-          this.quiet++;
-          if (this.quiet > 0.3 * this.fs) { const k = 1 / (0.5 * this.fs); for (let c = 0; c < 3; c++) this.b[c] += k * (a[c] - this.b[c]); }
-        } else this.quiet = 0;
-        if (mag > INC.START) {
-          L = this.lobe = { C: [0, 0, 0, 0, 0, 0], m: [0, 0, 0], n: 0, peak: 0, low: 0, v0: speed, i0: this.i };
-          this.quiet = 0;
-        }
-      }
-      if (L) {
-        const C = L.C;
-        C[0] += d[0] * d[0]; C[1] += d[0] * d[1]; C[2] += d[0] * d[2]; C[3] += d[1] * d[1]; C[4] += d[1] * d[2]; C[5] += d[2] * d[2];
-        L.m[0] += d[0]; L.m[1] += d[1]; L.m[2] += d[2]; L.n++; if (mag > L.peak) L.peak = mag;
-        L.low = mag < INC.END ? L.low + 1 : 0;
-        if (L.low >= INC.END_SEC * this.fs) { const e2 = this.close(speed); if (!ev) ev = e2; }
-      }
+      if (Math.hypot(d[0], d[1], d[2]) < INC.END) {
+        this.quiet++;
+        if (this.quiet > 0.3 * this.fs) { const k = 1 / (0.5 * this.fs); for (let c = 0; c < 3; c++) this.b[c] += k * (a[c] - this.b[c]); }
+      } else this.quiet = 0;
+      const ev = this.pulse(v, a);
       this.i++;
       return ev;
-    }
-    /** 덩어리 하나를 닫고 경사 방향을 판단한다 */
-    close(speed) {
-      const L = this.lobe; this.lobe = null; if (!L) return null;
-      const r = InclineDetector.dir(L.C, L.m);
-      if (!r || L.n < INC.MIN_SEC * this.fs || L.peak < INC.MIN_PEAK || r.ratio < INC.PCA || r.theta < INC.MIN_DEG || r.theta > INC.MAX_DEG) return null;
-      // 가속/감속: 덩어리마다 연직 속력 변화(Δv)를 쌓아 판단한다. 감속으로 속력이 크게 줄면 멈춘 것으로 보고 0
-      // (속력 적분이 조금 어긋나도 판단이 흔들리지 않게, 바깥 속력 대신 이 값을 쓴다)
-      const dv = L.m[0] / this.fs, v0 = this.vel;
-      const accel = Math.abs(v0) < 0.25 * Math.abs(dv) || Math.sign(dv) === Math.sign(v0);
-      this.vel = v0 + dv; if (!accel && Math.abs(this.vel) < 0.35 * Math.abs(v0)) this.vel = 0;
-      const base = { theta: r.theta, u: r.u, i0: L.i0, i: this.i, accel };
-      if (!this.found) {
-        const sure = r.theta <= INC.SURE_DEG && r.ratio >= INC.SURE_PCA;
-        const agree = this.cand && Math.abs(this.cand.theta - r.theta) <= INC.AGREE;
-        if (!sure && !agree) { this.cand = r; return null; }
-        this.found = true; this.u = r.u;
-        if (this.theta != null && Math.abs(Math.round(r.theta) - Math.round(this.theta)) >= INC.CHANGE) {
-          const from = this.theta; this.theta = r.theta; return { type: "change", from, ...base };
-        }
-        if (this.theta == null) this.theta = r.theta;
-        return { type: "detect", ...base, theta: this.theta };
-      }
-      this.u = r.u;
-      if (accel && Math.abs(Math.round(r.theta) - Math.round(this.theta)) >= INC.CHANGE) {
-        const from = this.theta; this.theta = r.theta; return { type: "change", from, ...base };
-      }
-      return null;
     }
     /** 3×3 대칭 행렬(합)의 주성분: 경사각(°), 수평 앞 방향(올라갈 때 움직이는 쪽) 단위벡터, 주성분 비율 */
     static dir(C, m) {
@@ -1039,7 +1058,10 @@
   /* ───────── 평가 · AI 평가 (2026-11-25 사용자 확정) ─────────
      평가에 영향을 주는 지표 (5단계: 아주 좋음 · 좋음 · 보통 · 나쁨 · 매우 나쁨)
        저크 |99% 피크|: ~0.8 · ~1.0 · ~1.4 · ~1.8 · 초과 (m/s³)       — 사용자 지정 (2026-11-25 A95 → 99% 피크)
-       상하·좌우 흔들림 |98% 피크|: ~8 · ~10 · ~15 · ~20 · 초과 (gal)   — 사용자 지정 (2026-11-26 A95 → 98% 피크, 기준값은 그대로)
+       상하 흔들림 |98% 피크|: ~15 · ~20 · ~30 · ~40 · 초과 (gal)   — 사용자 지정 (2026-11-26 ISO 2631 기반 승강기 수직 기준)
+       수평 흔들림 |98% 피크|: ~10 · ~15 · ~25 · ~35 · 초과 (gal)   — 사용자 지정 (2026-11-26 수평 기준, 수직 승강기의 좌우)
+       경사형 (2026-11-26 사용자 확정): 흔들림 기준은 수직 승강기의 2배 — 상하 ~30 · ~40 · ~60 · ~80, 앞뒤·좌우 ~20 · ~30 · ~50 · ~70 (gal)
+         가감속 세기는 앞뒤 방향 가감속도로 (기준은 그대로). 상하 툭툭 빈도는 평가에서 뺀다
        가감속 중 울렁임 (최댓값 + |최솟값|): ~15 · ~30 · ~45 · ~60 · 초과 — 사용자 지정
        출발·도착 거칠기 (p-p): ~20 · ~40 · ~60 · ~90 · 초과 (gal)       — 견본 12개로 정함 (매끄러운 출발 6~15, 덜컹 36~50, 요동 77, 우당탕 147~169)
        상하 툭툭 빈도 (정속 중 8 gal 넘게 튀는 횟수, 10초당): ~1 · ~2 · ~4 · ~8 · 초과 — 상하 흔들림 등급은 세기와 빈도 중 나쁜 쪽 (사용자 확정: 빈도는 평가에만, 문장에는 드러내지 않음)
@@ -1050,13 +1072,14 @@
        힘을 주는 시간 1.4초 이상 '슬며시', 0.55초 이하 '엣지 있게' / 힘을 빼는 시간 1.5초 이상 '슬며시', 0.5초 이하 '딱 끊어'
        흔들림의 결: 3 Hz 이하 출렁, 그 위 툭툭, 평소의 2.5배 넘게 한두 번만 튀면 '한 번 툭'
      속력: ~70 저속, ~130 중속, ~250 고속, ~500 초고속, 그 이상 '초고속의 초월' */
-  const EVAL_VER = 33;
+  const EVAL_VER = 35;
   const GRADE = ["아주 좋음", "좋음", "보통", "나쁨", "매우 나쁨"];
-  const TH = { jerk: [0.8, 1.0, 1.4, 1.8], vib: [8, 10, 15, 20], wave: [15, 30, 45, 60], start: [20, 40, 60, 90], arrive: [20, 40, 60, 90], hit: [1, 2, 4, 8] };
-  const DEC = { jerk: 2, vib: 1, wave: 0, start: 0, arrive: 0, hit: 1 };
-  function levelOf(v, key) {
+  const TH = { jerk: [0.8, 1.0, 1.4, 1.8], vibV: [15, 20, 30, 40], vibL: [10, 15, 25, 35], wave: [15, 30, 45, 60], start: [20, 40, 60, 90], arrive: [20, 40, 60, 90], hit: [1, 2, 4, 8] };
+  const TH_INC = Object.assign({}, TH, { vibV: TH.vibV.map(v => v * 2), vibL: TH.vibL.map(v => v * 2) });   // 경사형: 흔들림 기준 2배
+  const DEC = { jerk: 2, vibV: 1, vibL: 1, wave: 0, start: 0, arrive: 0, hit: 1 };
+  function levelOf(v, key, th = TH) {
     if (v == null) return null;
-    const r = +v.toFixed(DEC[key]), t = TH[key];   // 화면에 보이는 자릿수로 판정해 숫자와 평이 어긋나지 않게
+    const r = +v.toFixed(DEC[key]), t = th[key];   // 화면에 보이는 자릿수로 판정해 숫자와 평이 어긋나지 않게
     return r <= t[0] ? 0 : r <= t[1] ? 1 : r <= t[2] ? 2 : r <= t[3] ? 3 : 4;
   }
   // 가감속 세기 [하한, 이름, 꾸밈(~한), 이음(~하고), 서술(~해요)]
@@ -1234,23 +1257,31 @@
     const f = k === "single" ? ` · 최대 ${t.max.toFixed(0)} gal` : k === "none" || !t.freq ? "" : ` · 약 ${t.freq.toFixed(1)} Hz`;
     return `${dir} ${pickBy(WORDS.feel[k], seed, vertical ? 1 : 2)}${f}`;
   }
-  function evaluateBase(m) {
+  /** inc: 경사형이면 { vibF: 앞뒤 흔들림 } — 흔들림 기준 2배, 앞뒤 흔들림도 평가에 넣는다 */
+  function evaluateBase(m, inc) {
+    const th = inc ? TH_INC : TH;
     // 상하 흔들림: 세기(|98% 피크|)와 툭툭 빈도 중 나쁜 쪽. 문장은 세기만으로 고른다 (빈도는 드러내지 않음)
-    const vibVa = m.vibV && m.vibV.n ? levelOf(m.vibV.p98, "vib") : null;
-    const vibVh = m.vibV && m.vibV.seconds >= 5 ? levelOf(m.vibV.hitRate, "hit") : null;
+    const vibVa = m.vibV && m.vibV.n ? levelOf(m.vibV.p98, "vibV", th) : null;
+    const vibVh = !inc && m.vibV && m.vibV.seconds >= 5 ? levelOf(m.vibV.hitRate, "hit") : null;   // 경사형은 툭툭 빈도를 평가에서 뺀다 (2026-11-26 사용자 확정)
     const L = {
       jerk: levelOf(m.jerk, "jerk"),
       vibV: vibVa == null ? null : Math.max(vibVa, vibVh || 0),
-      vibL: m.vibL && m.vibL.n ? levelOf(m.vibL.p98, "vib") : null,
+      vibL: m.vibL && m.vibL.n ? levelOf(m.vibL.p98, "vibL", th) : null,
       wave: levelOf(m.wave, "wave"), start: levelOf(m.start, "start"), arrive: levelOf(m.arrive, "arrive"),
     };
+    if (inc) L.vibF = inc.vibF && inc.vibF.n ? levelOf(inc.vibF.p98, "vibL", th) : null;
     const lv = Object.values(L).filter(v => v != null).sort((a, b) => b - a);
     const overall = !lv.length ? null : lv.length === 1 ? lv[0] : Math.floor((lv[0] + lv[1]) / 2);
     const perfect = lv.length >= 3 && lv[0] === 0;
     const g = k => (L[k] == null ? { lv: -1, s: "기록이 없어요." } : { lv: L[k], s: GRADE[L[k]] });
     const xA = accLv(m.accMax), xD = accLv(m.decMax), seed = seedOf(m);
     const sg = speedGrade(m.speedMax);
-    const text = m.speedMax < 3 || overall == null ? "엘리베이터가 움직인 구간을 찾지 못했어요." : aiText(m, { ...L, vibV: vibVa, vibVg: L.vibV }, overall, perfect);
+    // 경사형 문장: 수평은 앞뒤·좌우 중 나쁜 쪽 하나로 말한다
+    const useF = inc && L.vibF != null && (L.vibL == null || L.vibF >= L.vibL);
+    const { vibF: _f, ...Lt } = L;
+    let text = m.speedMax < 3 || overall == null ? "엘리베이터가 움직인 구간을 찾지 못했어요."
+      : aiText(useF ? Object.assign({}, m, { vibL: inc.vibF }) : m, { ...Lt, vibL: useF ? L.vibF : L.vibL, vibV: vibVa, vibVg: L.vibV }, overall, perfect);
+    if (useF) text = text.replace(/좌우/g, "앞뒤");
     return {
       ver: EVAL_VER, overall: text, level: overall, levels: L,
       acc: { s: xA === xD ? xA[1] : `${xA[1]}·${xD[1]}`, t: xA === xD ? pickBy(WORDS.strength[xA[1]], seed) : `가속은 ${xA[3]} 감속은 ${xD[4]}`,
@@ -1258,6 +1289,7 @@
       jerk: g("jerk"), wave: g("wave"), start: g("start"), arrive: g("arrive"),
       vibV: { ...g("vibV"), line: vibLine(m.vibV, true, seed, L.vibV === 0) },
       vibL: m.vibL ? { ...g("vibL"), line: vibLine(m.vibL, false, seed) } : null,
+      vibF: inc && inc.vibF ? { ...g("vibF"), line: vibLine(inc.vibF, false, seed).replace("좌우로", "앞뒤로") } : null,
       // 정격 속력에 닿기 전에 감속한 짧은 운행 / 기록이 잘려 일부 구간으로만 잰 값 (2026-11-25 사용자 확정)
       speed: m.speedShort ? { lv: 0, t: "정격 속력에 닿기 전에 멈췄어요", s: sg.s, card: "정격 속력 미도달" }
         : m.speedRef ? { lv: 0, t: `${sg.t} (참고값)`, s: sg.s, card: `${m.speedMax <= 500 ? sg.s + " 승강기" : sg.s} · 참고값` }
@@ -1265,19 +1297,15 @@
     };
   }
 
-  /** 경사형: 가감속 세기는 경사 방향(실제로 몸이 받는 방향)으로, 흔들림 말은 위아래·앞뒤로 */
+  /** 경사형 (2026-11-26 사용자 확정): 가감속 세기는 앞뒤 방향 가감속도로, 흔들림은 상하·앞뒤·좌우 모두 수직 승강기 기준의 2배로 */
   function evaluate(m) {
-    const r = evaluateBase(m);
-    if (!m.incl || !(m.speedMax >= 3)) return r;
+    if (!m.incl || !(m.speedMax >= 3)) return evaluateBase(m);
     const I = m.incl, sn = Math.sin(I.theta * Math.PI / 180) || 1;
-    const mm = Object.assign({}, m, { accMax: m.accMax / sn, decMax: m.decMax / sn, accPeak: m.accPeak / sn, vibL: I.vibF, incl: null });
-    const e2 = evaluateBase(mm);
+    const mm = Object.assign({}, m, { accMax: I.accMax, decMax: I.decMax, accPeak: Math.max(I.accMax, I.decMax), incl: null });
+    const r = evaluateBase(mm, { vibF: I.vibF });
     const turn = I.changes.length ? ` 운행 중에 경사가 ${I.changes.map(c => `${c.from}°에서 ${c.to}°로`).join(", 다시 ")} 바뀌어요.` : "";
-    const txt = e2.overall.replace(/좌우/g, "앞뒤");
-    const cut = txt.indexOf(". ");
+    const txt = r.overall, cut = txt.indexOf(". ");
     r.overall = cut > 0 ? `${txt.slice(0, cut + 1)} 경사 ${I.theta}°로 오르내리는 경사형이에요.${turn} ${txt.slice(cut + 2)}` : `경사 ${I.theta}°로 오르내리는 경사형이에요.${turn} ${txt}`;
-    r.level = e2.level; r.acc = e2.acc;
-    r.vibF = e2.vibL ? { ...e2.vibL, line: (e2.vibL.line || "").replace("좌우로", "앞뒤로") } : null;
     r.fa = { a: accLv(I.accMax)[1], d: accLv(I.decMax)[1] };
     // 경사형 속력 등급 (2026-11-26 사용자 확정): 경사 방향 분속 35 m까지 저속, 그 위로 중속
     const along = I.speedAlong != null ? I.speedAlong : m.speedMax / sn, gs = along <= 35 ? "저속" : "중속";
@@ -1427,7 +1455,8 @@
 
   /* ───────── 데모 원시 신호 (센서가 없는 화면용) ───────── */
   class DemoSignal {
-    /** opts.incline: 경사형 엘리베이터 데모 (경사 30°로 올라가다 멈춘 뒤, 20°로 다시 출발. 2026-11-26) */
+    /** opts.incline: 경사형 엘리베이터 데모 (경사 30°로 올라가다 멈춘 뒤, 20°로 다시 출발. 2026-11-26)
+     *  opts.rec: 실측 경사형 기록 재생 (Int16 [상하, 전후, 좌우] × 0.001 m/s², 60 Hz). 있으면 합성 대신 그대로 재생 (2026-11-26) */
     constructor(opts = {}) {
       this.incline = !!opts.incline;
       this.rate = 100; this.i = 0; this.v = 0; this.bump = 0; this.bumpT = 0; this.bumpLat = 0;
@@ -1450,13 +1479,19 @@
       still(1.6 + 1.0 + 1.5);                       // 들고 있음 + 안정(1초) + 대기
       const th = [];                                // 경사형: 샘플마다 경사각(°)
       if (this.incline) {
+        const m = [this.gd[1] * this.ld[2] - this.gd[2] * this.ld[1], this.gd[2] * this.ld[0] - this.gd[0] * this.ld[2], this.gd[0] * this.ld[1] - this.gd[1] * this.ld[0]];
+        const c = Math.cos(35 * Math.PI / 180), s = Math.sin(35 * Math.PI / 180);
+        this.fd = [0, 1, 2].map(k => c * this.ld[k] + s * m[k]);   // 앞 방향: 좌우축과 그 직각 수평축 사이 35°
+      }
+      if (this.incline && opts.rec && opts.rec.length >= 300) {
+        // 실측 기록 재생: 60 Hz → 100 Hz 선형 보간. 손에 든 1.6초 뒤 바로 기록의 정지 구간부터 시작
+        const R = opts.rec, n60 = R.length / 3, n = Math.floor((n60 - 1) * this.rate / 60), at = (k, c) => { const x = k * 60 / this.rate, i = Math.floor(x), f = x - i; return (R[i * 3 + c] * (1 - f) + R[Math.min(n60 - 1, i + 1) * 3 + c] * f) / 1000; };
+        this.rec = [0, 1, 2].map(c => Float32Array.from({ length: n }, (_, k) => at(k, c)));
+        prof.length = 0; this.recAt = this.handUntil; still(1.6 + n / this.rate + 1.5);
+      } else if (this.incline) {
         trip(0.75, 0.42, 0.35, 5, 1); while (th.length < prof.length) th.push(30);
         still(3.0); trip(0.75, 0.45, 0.35, 4, 1); while (th.length < prof.length) th.push(20);
         still(1.5); while (th.length < prof.length) th.push(20);
-        // 앞 방향: 좌우축과 그 직각 수평축 사이 35°
-        const m = [this.gd[1] * this.ld[2] - this.gd[2] * this.ld[1], this.gd[2] * this.ld[0] - this.gd[0] * this.ld[2], this.gd[0] * this.ld[1] - this.gd[1] * this.ld[0]];
-        const c = Math.cos(35 * Math.PI / 180), s = Math.sin(35 * Math.PI / 180);
-        this.fd = [0, 1, 2].map(k => c * this.ld[k] + s * m[k]);
       } else { trip(2.5, 0.55, 0.45, 5, 1); still(2.5); trip(1.75, 0.5, 0.45, 3, -1); still(1.5); }
       this.th = th;
       this.prof = prof;
@@ -1491,7 +1526,11 @@
         noise = 0.12;
         if (i >= this.pickAt && i < this.pickAt + 0.25 * this.rate) extra = [this.gauss() * 1.5, 2.2 + this.gauss(), this.gauss() * 1.5];
       }
-      if (this.incline && i < this.prof.length) {
+      if (this.rec && i >= this.recAt && i < this.recAt + this.rec[0].length) {
+        const k = i - this.recAt, up = G0 + this.rec[0][k];
+        return [0, 1, 2].map(c => up * this.gd[c] + this.rec[1][k] * this.fd[c] + this.rec[2][k] * this.ld[c]);
+      }
+      if (this.incline && !this.rec && i < this.prof.length) {
         // 경사 방향 가속 a를 연직(sin)과 앞뒤(cos)로 나눈다. 앞뒤 축에도 레일 이음매의 잔흔들림
         const T = this.th[i] * Math.PI / 180, fv = run * 0.012 * Math.sin(2 * Math.PI * 4.1 * t + 0.5);
         const up = G0 + a * Math.sin(T) + vib, fwd = a * Math.cos(T) + fv;
