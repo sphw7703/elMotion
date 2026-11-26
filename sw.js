@@ -1,5 +1,5 @@
 /* elMotion 서비스 워커: 온라인이면 항상 최신 파일, 신호가 끊기면(엘리베이터 안 등) 저장해 둔 파일로 실행 */
-const CACHE = "elmotion-v69";
+const CACHE = "elmotion-v70";
 const FILES = ["./", "index.html", "app.js", "core.js", "render.js", "sync.js", "manifest.webmanifest",
   "assets/glass.webp", "assets/glass-dark.webp", "assets/fonts/NanumSquareNeo-Variable.woff",
   "assets/ic-measure.png", "assets/ic-records.png", "assets/ic-settings.png",

@@ -4,7 +4,7 @@
 /* ───────── 상수 ───────── */
 const FS = Core.FS;
 /* 앱 버전 (2026-11-25 사용자 확정): 0.큰 기능 묶음.고친 횟수 — 웹 앱 확정 때 1.0.0, 안드로이드 앱 때 2.0.0 */
-const APP_VERSION = "0.13.6";
+const APP_VERSION = "0.13.7";
 const LEGEND = { acc: 1.5, lat: 30, latA: 20, spd: 600 };
 const LEGEND_INC = { acc: 0.6, lat: 20, spd: 90 };   // 경사형 게이지 범례 (2026-11-26): 경사형은 60 m/min 이하라 속력 90, 가감속·흔들림은 측정 자료 기준   // 물 높이 범례 (화면에 표시하지 않음). lat: 실시간 p-p, latA: 기록의 |98% 피크|
 const CUT = Math.round(Core.P.CUT_SEC * FS);
@@ -170,10 +170,9 @@ class TriGauge {
     }
     return d + "Z";
   }
-  constructor(kind, size, unit) {
-    const id = "tg" + ++TRI, d = TriGauge.path();
-    this.el = document.createElement("div"); this.el.className = `tri k-${kind}`; this.el.style.cssText = `--d:${size}px`;
-    this.el.innerHTML = `<svg viewBox="0 0 200 200" class="tri-svg" aria-hidden="true"><defs>
+  /** 유리 삼각형 SVG (실시간 게이지·기록 목록 공용) */
+  static svg(id, d) {
+    return `<svg viewBox="0 0 200 200" class="tri-svg" aria-hidden="true"><defs>
       <clipPath id="c${id}"><path d="${d}"/></clipPath>
       <linearGradient id="gb${id}" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#fff" stop-opacity=".62"/><stop offset=".55" stop-color="#fff" stop-opacity=".22"/><stop offset="1" stop-color="#fff" stop-opacity=".38"/></linearGradient>
       <radialGradient id="gw${id}" cx="25%" cy="70%" r="95%"><stop offset="0" style="stop-color:var(--wl)"/><stop offset=".55" style="stop-color:var(--wm)"/><stop offset="1" style="stop-color:var(--wd)"/></radialGradient>
@@ -186,7 +185,12 @@ class TriGauge {
         <g class="water" style="transform:translateY(200px)"><path class="wl" d="${WAVE_LINE}" fill="none" stroke="rgba(255,255,255,.5)" stroke-width="1.4"/></g>
         <path d="M14 14 L14 120 L120 120 Z" fill="url(#gt${id})" opacity=".5"/></g>
       <path d="${d}" fill="none" stroke="rgba(255,255,255,.95)" stroke-width="2.2"/>
-      <path d="${d}" fill="none" class="tri-edge" stroke-width="1"/></svg>
+      <path d="${d}" fill="none" class="tri-edge" stroke-width="1"/></svg>`;
+  }
+  constructor(kind, size, unit) {
+    const id = "tg" + ++TRI, d = TriGauge.path();
+    this.el = document.createElement("div"); this.el.className = `tri k-${kind}`; this.el.style.cssText = `--d:${size}px`;
+    this.el.innerHTML = TriGauge.svg(id, d) + `
       <div class="tri-v"><b></b><i>수직</i></div><div class="tri-h"><b></b><i>앞뒤</i></div>${kind === "spd" ? `<div class="tri-s"><b></b><i>경사 방향</i></div>` : ""}<div class="tri-u">${unit || ""}</div>`;
     this.waters = [...this.el.querySelectorAll(".water")];
     this.vb = this.el.querySelector(".tri-v b"); this.hb = this.el.querySelector(".tri-h b"); this.sb = this.el.querySelector(".tri-s b");
@@ -206,6 +210,12 @@ class TriGauge {
     if (vert != null) this.vb.textContent = vert; if (fore != null) this.hb.textContent = fore;
     if (along != null && this.sb) this.sb.textContent = along; return this;
   }
+}
+
+/** 기록 목록용 작은 삼각형 게이지: 물 높이는 고정 (2026-11-26) */
+function triMini(kind, v, inner) {
+  const id = "tm" + ++TRI, lv = clamp(v, 0, 1), y = 186 - (lv <= 0 ? -0.05 : Math.max(lv, 0.045)) * 172 - 6;
+  return `<div class="mini-tri tri k-${kind}" style="--d:70px">${TriGauge.svg(id, TriGauge.path()).replace(/translateY\(200px\)/g, `translateY(${y.toFixed(1)}px)`)}${inner}</div>`;
 }
 
 const charts = {
@@ -455,6 +465,8 @@ function metaOf(rec) {
   return {
     id: rec.id, name: rec.name || "", startedAt: rec.startedAt, duration: m.duration, demo: !!rec.demo, imported: !!rec.imported, hasLat: !!rec.lat,
     accPeak: m.accPeak, accMax: m.accMax, decMax: m.decMax, latP98: m.vibL ? m.vibL.p98 : null, speedMax: m.speedMax, overall: m.eval.overall, updatedAt: rec.updatedAt || Date.now(), evalVer: Core.EVAL_VER, srcKey: rec.srcKey || null,
+    // 경사형: 목록의 삼각형 게이지용 앞뒤 방향 값 (2026-11-26)
+    incl: m.incl ? { accMax: m.incl.accMax, decMax: m.incl.decMax, lat: m.incl.vibF && m.incl.vibF.n ? m.incl.vibF.p98 : null, speedMax: m.incl.speedMax } : null,
   };
 }
 const store = {
@@ -982,10 +994,15 @@ const records = {
           <div class="t"><div class="rc-name"><span class="nm">${q ? finder.mark(m.name || fmtDate(m.startedAt), finder.find(q, m.name || fmtDate(m.startedAt))) : esc(m.name || fmtDate(m.startedAt))}</span>${m.demo ? '<span class="tag">데모</span>' : ""}${m.imported ? '<span class="tag">가져옴</span>' : ""}</div>
           <div class="rc-date">${m.name ? (q ? finder.mark(fmtDate(m.startedAt), finder.find(q, fmtDate(m.startedAt))) : fmtDate(m.startedAt)) + " · " : ""}${fmtDur(m.duration)}</div></div>
           <button class="ic-btn pop" data-act="edit" aria-label="이름 변경">${ICON.edit}</button></div>
-        <div class="rc-body"><div class="minis">
+        <div class="rc-body"><div class="minis">${m.incl ? (() => {
+          const I = m.incl, fl = I.lat, ft = fl == null ? "—" : fl.toFixed(1), st = I.speedMax.toFixed(1);
+          return triMini("acc", Math.max(I.accMax, I.decMax) / LEGEND_INC.acc, `<span class="ms two"><b>${I.accMax.toFixed(2)}</b><b>${I.decMax.toFixed(2)}</b><i>m/s²</i></span>`)
+            + triMini("lat", fl == null ? 0 : fl / LEGEND_INC.lat, `<span class="ms"><b${fitMini(ft)}>${ft}</b><i>${fl == null ? "" : "gal"}</i></span>`)
+            + triMini("spd", I.speedMax / LEGEND_INC.spd, `<span class="ms"><b${fitMini(st)}>${st}</b><i>m/min</i></span>`);
+        })() : `
           <div class="mini k-acc" style="--lv:${lv(m.accPeak, "acc")}%"><span class="ms two"><b>${(m.accMax ?? m.accPeak).toFixed(2)}</b><b>${(m.decMax ?? m.accPeak).toFixed(2)}</b><i>m/s²</i></span></div>
           <div class="mini k-lat" style="--lv:${m.latP98 == null ? 0 : lv(m.latP98, "latA")}%"><span class="ms"><b${fitMini(lat)}>${lat}</b><i>${m.latP98 == null ? "" : "gal"}</i></span></div>
-          <div class="mini k-spd" style="--lv:${lv(m.speedMax, "spd")}%"><span class="ms"><b${fitMini(m.speedMax.toFixed(1))}>${m.speedMax.toFixed(1)}</b><i>m/min</i></span></div></div>
+          <div class="mini k-spd" style="--lv:${lv(m.speedMax, "spd")}%"><span class="ms"><b${fitMini(m.speedMax.toFixed(1))}>${m.speedMax.toFixed(1)}</b><i>m/min</i></span></div>`}</div>
           <div class="rc-line">${esc(firstSentence(m.overall))}</div></div></article>`;
     }).join("");
     if (anim) stagger(list, 12);

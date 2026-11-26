@@ -232,6 +232,16 @@ canvas.chart { display: block; width: 100%; height: 150px; touch-action: pan-y; 
 .mini i { font-style: normal; font-weight: 100; font-size: 8.5px; color: #fff; margin-top: 1px; letter-spacing: 0; text-shadow: .6px 1px 1.8px rgba(14,20,62,.75), 0 0 1px rgba(14,20,62,.4); transform: translateX(3px); }
 :root:not([data-ui="dark"]) .mini i { text-shadow: .6px 1px 1.6px rgba(14,20,62,.85), 0 0 2.5px rgba(14,20,62,.55); }
 .mini .ms.two b { font-size: 11.5px; line-height: 1; }   /* 모든 게이지: 큰 게이지처럼 숫자는 왼쪽, 단위는 오른쪽으로 살짝 */
+/* 기록 목록 경사형: 작은 삼각형 게이지, 숫자는 삼각형 왼쪽 아래 넓은 곳에 (2026-11-26) */
+.mini-tri .w1, .mini-tri .wl { animation: none; }
+.mini-tri .tri-depth { transform: translate(3px, 4px); }
+.minis:has(.mini-tri) { gap: 8px; }
+.rc-body:has(.mini-tri) .rc-line { margin-left: -22px; word-break: keep-all; }   /* 마지막 삼각형의 비어 있는 오른쪽 위로 당긴다 */
+.mini-tri .ms { position: absolute; left: 12%; bottom: 9%; z-index: 1; display: flex; flex-direction: column; align-items: flex-start; line-height: 1; }
+.mini-tri b { font-size: 12px; font-weight: 800; color: #fff; letter-spacing: -.02em; line-height: .95; font-variant-numeric: tabular-nums; text-shadow: .8px 1.2px 2.2px rgba(14,20,62,.7), 0 0 1px rgba(14,20,62,.35); }
+.mini-tri b[style*="12px"] { font-size: 11px !important; }   /* 100.0 같은 다섯 글자 */
+.mini-tri .ms.two b { font-size: 10.5px; line-height: 1; }
+.mini-tri i { font-style: normal; font-weight: 100; font-size: 8.5px; color: #fff; margin-top: 1px; text-shadow: .6px 1px 1.8px rgba(14,20,62,.75), 0 0 1px rgba(14,20,62,.4); }
 .mini.k-acc { --c1: #6F80D0; --c2: #2338B0; } .mini.k-lat { --c1: #B39AB0; --c2: #8C5573; } .mini.k-spd { --c1: #9E9AC0; --c2: #574383; }
 .rc-line { font-size: 13px; color: var(--ink-2); line-height: 1.45; }
 .tag { font-size: 10.5px; font-weight: 800; padding: 2px 6px; border-radius: 5px; background: var(--surface-2); color: var(--ink-2); margin-left: 6px; vertical-align: 2px; }
