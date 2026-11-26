@@ -251,7 +251,7 @@
     constructor(fs = FS, prevTheta = null) {
       this.fs = fs; this.f = [0, 1, 2].map(() => Biquad.make(INC.LP, fs, false));
       this.b = [0, 0, 0]; this.quiet = 0; this.lobe = null; this.i = 0;
-      this.theta = prevTheta; this.u = null; this.found = false;
+      this.theta = prevTheta; this.u = null; this.found = false; this.vel = 0;
     }
     /** v, h1, h2: m/s² (중력 제거, 연직·수평 두 축) · speed: 연직 속력 (m/s, 가속/감속 판정용)
         @returns {null | {type:"detect"|"change", theta, from?, u, i0, i}} */
@@ -289,7 +289,11 @@
       const L = this.lobe; this.lobe = null; if (!L) return null;
       const r = InclineDetector.dir(L.C, L.m);
       if (!r || L.n < INC.MIN_SEC * this.fs || L.peak < INC.MIN_PEAK || r.ratio < INC.PCA || r.theta < INC.MIN_DEG || r.theta > INC.MAX_DEG) return null;
-      const accel = Math.abs(speed) > Math.abs(L.v0) + 0.02;
+      // 가속/감속: 덩어리마다 연직 속력 변화(Δv)를 쌓아 판단한다. 감속으로 속력이 크게 줄면 멈춘 것으로 보고 0
+      // (속력 적분이 조금 어긋나도 판단이 흔들리지 않게, 바깥 속력 대신 이 값을 쓴다)
+      const dv = L.m[0] / this.fs, v0 = this.vel;
+      const accel = Math.abs(v0) < 0.25 * Math.abs(dv) || Math.sign(dv) === Math.sign(v0);
+      this.vel = v0 + dv; if (!accel && Math.abs(this.vel) < 0.35 * Math.abs(v0)) this.vel = 0;
       const base = { theta: r.theta, u: r.u, i0: L.i0, i: this.i, accel };
       if (!this.found) {
         const sure = r.theta <= INC.SURE_DEG && r.ratio >= INC.SURE_PCA;
@@ -1419,7 +1423,9 @@
 
   /* ───────── 데모 원시 신호 (센서가 없는 화면용) ───────── */
   class DemoSignal {
-    constructor() {
+    /** opts.incline: 경사형 엘리베이터 데모 (경사 30°로 올라가다 멈춘 뒤, 20°로 다시 출발. 2026-11-26) */
+    constructor(opts = {}) {
+      this.incline = !!opts.incline;
       this.rate = 100; this.i = 0; this.v = 0; this.bump = 0; this.bumpT = 0; this.bumpLat = 0;
       const g = [0.05, 0.99, 0.12], m = Math.hypot(...g); this.gd = g.map(c => c / m);
       const lx = [1 - this.gd[0] ** 2, -this.gd[0] * this.gd[1], -this.gd[0] * this.gd[2]], lm = Math.hypot(...lx);
@@ -1438,7 +1444,17 @@
       };
       this.handUntil = 1.6 * this.rate;           // 손에 든 상태
       still(1.6 + 1.0 + 1.5);                       // 들고 있음 + 안정(1초) + 대기
-      trip(2.5, 0.55, 0.45, 5, 1); still(2.5); trip(1.75, 0.5, 0.45, 3, -1); still(1.5);
+      const th = [];                                // 경사형: 샘플마다 경사각(°)
+      if (this.incline) {
+        trip(0.75, 0.42, 0.35, 5, 1); while (th.length < prof.length) th.push(30);
+        still(3.0); trip(0.75, 0.45, 0.35, 4, 1); while (th.length < prof.length) th.push(20);
+        still(1.5); while (th.length < prof.length) th.push(20);
+        // 앞 방향: 좌우축과 그 직각 수평축 사이 35°
+        const m = [this.gd[1] * this.ld[2] - this.gd[2] * this.ld[1], this.gd[2] * this.ld[0] - this.gd[0] * this.ld[2], this.gd[0] * this.ld[1] - this.gd[1] * this.ld[0]];
+        const c = Math.cos(35 * Math.PI / 180), s = Math.sin(35 * Math.PI / 180);
+        this.fd = [0, 1, 2].map(k => c * this.ld[k] + s * m[k]);
+      } else { trip(2.5, 0.55, 0.45, 5, 1); still(2.5); trip(1.75, 0.5, 0.45, 3, -1); still(1.5); }
+      this.th = th;
       this.prof = prof;
       this.pickAt = prof.length;                    // 이 시점부터 집어 듦
     }
@@ -1470,6 +1486,12 @@
         const gm = Math.hypot(...gd); gd = gd.map(c => c / gm);
         noise = 0.12;
         if (i >= this.pickAt && i < this.pickAt + 0.25 * this.rate) extra = [this.gauss() * 1.5, 2.2 + this.gauss(), this.gauss() * 1.5];
+      }
+      if (this.incline && i < this.prof.length) {
+        // 경사 방향 가속 a를 연직(sin)과 앞뒤(cos)로 나눈다. 앞뒤 축에도 레일 이음매의 잔흔들림
+        const T = this.th[i] * Math.PI / 180, fv = run * 0.012 * Math.sin(2 * Math.PI * 4.1 * t + 0.5);
+        const up = G0 + a * Math.sin(T) + vib, fwd = a * Math.cos(T) + fv;
+        return [0, 1, 2].map(c => up * gd[c] + fwd * this.fd[c] + latv * this.ld[c] + extra[c] + this.gauss() * noise);
       }
       const up = G0 + a + vib;
       return [0, 1, 2].map(c => up * gd[c] + latv * this.ld[c] + extra[c] + this.gauss() * noise);

@@ -4,7 +4,7 @@
 /* ───────── 상수 ───────── */
 const FS = Core.FS;
 /* 앱 버전 (2026-11-25 사용자 확정): 0.큰 기능 묶음.고친 횟수 — 웹 앱 확정 때 1.0.0, 안드로이드 앱 때 2.0.0 */
-const APP_VERSION = "0.13.0";
+const APP_VERSION = "0.13.1";
 const LEGEND = { acc: 1.5, lat: 30, latA: 20, spd: 600 };
 const LEGEND_INC = { acc: 0.6, lat: 20, spd: 90 };   // 경사형 게이지 범례 (2026-11-26): 경사형은 60 m/min 이하라 속력 90, 가감속·흔들림은 측정 자료 기준   // 물 높이 범례 (화면에 표시하지 않음). lat: 실시간 p-p, latA: 기록의 |98% 피크|
 const CUT = Math.round(Core.P.CUT_SEC * FS);
@@ -121,6 +121,7 @@ class Sphere {
       <div class="glass-top"></div><div class="nums"></div>`;
     this.waters = [...this.el.querySelectorAll(".water")];
     this.nums = this.el.querySelector(".nums");
+    deco.watch(this.el);
     this.lv = -1;
   }
   /** 0~1, 아래에서 위로 */
@@ -146,6 +147,16 @@ class Sphere {
 /* ───────── 그래프 ───────── */
 /* ───────── 경사형 게이지: 꼭짓점이 둥근 직각삼각형 유리 (직각 = 왼쪽 아래, 2026-11-26 사용자 확정)
    왼쪽 변 = 수직 값, 아래 변 = 앞뒤 값. 두꺼운 무채색 유리 테두리 + 안쪽 면 + 아래오른쪽 두께. 물은 원형 게이지와 같은 색 */
+/* 성능 ③ (2026-11-26): 장식 애니메이션은 화면에 보일 때만, 스크롤 중에는 멈춘다 */
+const deco = {
+  io: typeof IntersectionObserver !== "undefined" ? new IntersectionObserver(es => es.forEach(e => { if (!e.target.isConnected) { deco.io.unobserve(e.target); return; } e.target.classList.toggle("off", !e.isIntersecting); })) : null,
+  watch(el) { if (this.io && el) this.io.observe(el); return el; },
+  init() {
+    let t = 0; const root = document.documentElement;
+    document.addEventListener("scroll", () => { if (!t) root.classList.add("scrolling"); clearTimeout(t); t = setTimeout(() => { t = 0; root.classList.remove("scrolling"); }, 180); }, { capture: true, passive: true });
+  },
+};
+deco.init();
 let TRI = 0;
 class TriGauge {
   static path(d, r) {
@@ -187,6 +198,7 @@ class TriGauge {
       <div class="tri-v"><b></b><i>수직</i></div><div class="tri-h"><b></b><i>앞뒤</i></div>`;
     this.waters = [...this.el.querySelectorAll(".water")];
     this.vb = this.el.querySelector(".tri-v b"); this.hb = this.el.querySelector(".tri-h b");
+    deco.watch(this.el);
     this.lv = -1;
   }
   /** 0~1: 안쪽 면 바닥(173)에서 꼭대기(약 45)까지 */
@@ -548,9 +560,12 @@ const ctl = {
     });
     setTimeout(() => { if (!this.gotEvent && (!this.needPermission || inPreview())) { this.sensorOk = false; home.render(); } }, 2500);
   },
-  startDemo() {
+  /** incline: 경사형 엘리베이터 데모 (설정 → 데모 측정, 2026-11-26) */
+  startDemo(incline) {
+    if (this.state === "measure") { toast("측정 중에는 데모를 시작할 수 없어요."); return; }
+    this.stopDemo();
     this.res.reset(); this.stab.reset(); this.needDisturb = false;
-    const sig = new Core.DemoSignal(), t0 = performance.now();
+    const sig = new Core.DemoSignal({ incline }), t0 = performance.now();
     let i = 0;
     this.demo = setInterval(() => {
       const target = Math.floor((performance.now() - t0) / 10);
@@ -1179,7 +1194,7 @@ const detail = {
       <div id="dBody"></div>
       <div class="toggle-wrap"><button class="tog-text ${this.detail ? "up" : ""}" id="dTog">${ICON.chev}${this.detail ? "접을래요" : "자세히 볼래요"}</button></div>`;
     this.renderHead();
-    const ai = box.querySelector(".ai-box"); if (ai) rainbowColors(ai);
+    const ai = box.querySelector(".ai-box"); if (ai) { rainbowColors(ai); deco.watch(ai); }
     $("#dBack").onclick = () => nav.back();
     $("#dEdit").onclick = () => records.renameDlg(r.id, r.name);
     $("#dDel").onclick = () => this.remove();
@@ -1309,6 +1324,11 @@ const settings = {
       <p>측정값은 휴대폰 센서로 구한 참고값이에요. 공식 승차감 검사를 대신하지 않아요.</p>
       <div class="acts"><button class="solid" id="dOk">확인</button></div>`, (b, close) => { b.querySelector("#dOk").onclick = close; });
     this.renderMode();
+    // 데모 측정: 홈으로 가서 데모 신호로 측정 (일반 / 경사형)
+    document.querySelectorAll("#demoBtns button").forEach(b => b.onclick = () => {
+      if (ctl.state === "measure") { toast("측정 중에는 데모를 시작할 수 없어요."); return; }
+      nav.go(1); setTimeout(() => ctl.startDemo(b.dataset.demo === "incl"), 350);
+    });
   },
   renderMode() {
     const mode = ctl.mode, seg = $("#modeSeg"), btns = [...seg.querySelectorAll("button")];

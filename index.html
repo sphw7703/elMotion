@@ -104,8 +104,8 @@ button:focus-visible, [tabindex]:focus-visible, input:focus-visible { outline: 2
 .live-pill[hidden] { display: none; }
 .live-pill i { width: 8px; height: 8px; border-radius: 50%; background: var(--danger); animation: blink 1.2s infinite; }
 /* 2026-11-25: 알약을 키움 — '?' 버튼과 같은 높이, 점·글자가 도형 안쪽에 들어오게 */
-.live-pill.glass { height: 42px; padding: 0 16px 0 14px; gap: 9px; font-size: 16px; border-radius: 999px; }
-.live-pill.glass i { width: 10px; height: 10px; flex: none; }
+.live-pill.glass { height: 38px; padding: 0 14px 0 12px; gap: 8px; font-size: 15px; border-radius: 999px; }
+.live-pill.glass i { width: 9px; height: 9px; flex: none; }
 @keyframes blink { 50% { opacity: .25; } }
 .home-body { flex: 1; display: flex; flex-direction: column; align-items: center; }
 .single { position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; flex: 1; min-height: 380px; }
@@ -287,6 +287,7 @@ canvas.chart { display: block; width: 100%; height: 150px; touch-action: pan-y; 
 .set-row { display: flex; align-items: center; gap: 12px; }
 .set-row .t { flex: 1; }
 .set-row .t p { margin: 2px 0 0; font-size: 12.5px; color: var(--ink-2); }
+.demo-btns { display: flex; gap: 6px; flex: none; }
 /* 기기 연동 (2026-11-25) */
 #syncCard [hidden] { display: none !important; }
 .sync-acts { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
@@ -471,7 +472,7 @@ body { background: var(--page-bg); background-attachment: fixed; }
   background: radial-gradient(circle at 28% 32%, var(--c1) 0 12%, transparent 34%), radial-gradient(circle at 72% 30%, var(--c2) 0 10%, transparent 32%),
     radial-gradient(circle at 70% 70%, var(--c5) 0 12%, transparent 34%), radial-gradient(circle at 30% 72%, var(--c4) 0 10%, transparent 32%),
     radial-gradient(circle at 50% 50%, var(--c6) 0 14%, transparent 40%), radial-gradient(circle at 50% 12%, var(--c3) 0 8%, transparent 28%);
-  filter: blur(7px) saturate(115%); opacity: .95; animation: aiSwirl 9s linear infinite; }
+  filter: blur(7px) saturate(115%); opacity: .95; animation: aiSwirl 9s linear infinite; will-change: transform; }
 .ai-box .ai-chip::after { content: ""; position: absolute; inset: 0; z-index: -1; border-radius: inherit; pointer-events: none;
   background: linear-gradient(180deg, rgba(255, 255, 255, .62) 0%, rgba(255, 255, 255, .12) 48%, rgba(255, 255, 255, 0) 60%, rgba(255, 255, 255, .25) 100%); }
 :root[data-ui="dark"] .ai-box .ai-chip { color: #fff; background: #191428; text-shadow: 0 0 6px rgba(255, 220, 245, .55);
@@ -489,12 +490,17 @@ body { background: var(--page-bg); background-attachment: fixed; }
 .ai-box.glass::before, .ai-glow i { content: ""; position: absolute; inset: -1px; border-radius: inherit; pointer-events: none;
   background: conic-gradient(from var(--ai-a), var(--c1), var(--c2), var(--c3), var(--c4), var(--c5), var(--c6), var(--c1));
   -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite: xor; mask-composite: exclude;
-  animation: aiSpin 6s linear infinite; }
+  animation: aiSpin 6s steps(120) infinite; }   /* 성능 ③ (2026-11-26): 테두리 색 회전은 1초에 20번만 다시 그린다 */
 .ai-box.glass::before { padding: 1.5px; z-index: -1; }
 .ai-glow { position: absolute; inset: 0; border-radius: inherit; z-index: -2; pointer-events: none; filter: blur(7px); opacity: .9; }
 .ai-glow i { padding: 4px; }
 :root[data-ui="dark"] .ai-glow { opacity: .75; filter: blur(9px); }
 @media (prefers-reduced-motion: reduce) { .ai-box .ai-chip::before, .ai-box.glass::before, .ai-glow i { animation: none; } }
+/* 성능 ③ (2026-11-26): 화면 밖이거나 스크롤하는 동안에는 장식 애니메이션(AI 테두리·칩 소용돌이·게이지 물결)을 멈춘다 */
+:root.scrolling .ai-box.glass::before, :root.scrolling .ai-glow i, :root.scrolling .ai-box .ai-chip::before,
+:root.scrolling .sphere .w1, :root.scrolling .sphere .wl, :root.scrolling .tri .w1, :root.scrolling .tri .wl,
+.ai-box.off::before, .ai-box.off .ai-glow i, .ai-box.off .ai-chip::before,
+.sphere.off .w1, .sphere.off .wl, .tri.off .w1, .tri.off .wl { animation-play-state: paused; }
 .ic-btn { border-radius: 50%; }
 .seg { border-radius: 999px; background: var(--surface-2); padding: 4px; }
 .seg button { border-radius: 999px; }
@@ -586,8 +592,9 @@ body.selecting #recList { padding-bottom: 150px; }
 :root.wide .app { max-width: none; }
 :root.wide .page { padding: 0 44px 24px; }
 :root.wide .nav { align-self: center; width: 540px; }
-:root.wide .live-pill, :root.wide .live-pill.glass { height: 52px; font-size: 22px; gap: 12px; padding: 0 22px 0 18px; }
-:root.wide .live-pill i { width: 12px; height: 12px; }
+/* 2026-11-26: 아래 카드에 닿지 않게 살짝 줄임 ('?' 버튼과 같은 높이) */
+:root.wide .live-pill, :root.wide .live-pill.glass { height: 42px; font-size: 18px; gap: 10px; padding: 0 18px 0 15px; }
+:root.wide .live-pill i { width: 10px; height: 10px; }
 :root.wide .single .caption { font-size: 46px; letter-spacing: -1px; min-height: 60px; }
 :root.wide .single .sub { font-size: 18px; max-width: 560px; }
 :root.wide .triple { flex: 1; flex-direction: row; justify-content: center; align-items: center; gap: 5vw; padding: 0; }
@@ -675,6 +682,12 @@ body.selecting #recList { padding-bottom: 150px; }
           <div class="set-row">
             <div class="t"><h3 style="margin:0">측정 방식</h3><p id="modeDesc"></p></div>
             <div class="seg" id="modeSeg"><span class="thumb"></span><button data-mode="auto">자동</button><button data-mode="manual">수동</button></div>
+          </div>
+        </div>
+        <div class="set-card glass">
+          <div class="set-row">
+            <div class="t"><h3 style="margin:0">데모 측정</h3><p>센서 대신 미리 만든 신호로 측정해 봐요</p></div>
+            <div class="demo-btns" id="demoBtns"><button class="pill-btn" data-demo="std">일반</button><button class="pill-btn" data-demo="incl">경사형</button></div>
           </div>
         </div>
         <div class="set-card glass" id="syncCard">
