@@ -4,7 +4,7 @@
 /* ───────── 상수 ───────── */
 const FS = Core.FS;
 /* 앱 버전 (2026-11-25 사용자 확정): 0.큰 기능 묶음.고친 횟수 — 웹 앱 확정 때 1.0.0, 안드로이드 앱 때 2.0.0 */
-const APP_VERSION = "0.13.11";
+const APP_VERSION = "0.13.12";
 const LEGEND = { acc: 1.5, lat: 30, latA: 20, spd: 600 };
 const LEGEND_INC = { acc: 1.0, lat: 80, spd: 90 };   // 경사형 게이지 범례 (2026-11-26 사용자 확정): 가감속 1.0 m/s², 흔들림 80 gal, 속력 90 m/min   // 물 높이 범례 (화면에 표시하지 않음). lat: 실시간 p-p, latA: 기록의 |98% 피크|
 const CUT = Math.round(Core.P.CUT_SEC * FS);
@@ -191,7 +191,7 @@ class TriGauge {
     const id = "tg" + ++TRI, d = TriGauge.path();
     this.el = document.createElement("div"); this.el.className = `tri k-${kind}`; this.el.style.cssText = `--d:${size}px`;
     this.el.innerHTML = TriGauge.svg(id, d) + `
-      <div class="tri-v"><b></b><i>수직</i></div><div class="tri-h"><b></b><i>앞뒤</i></div>${kind === "spd" ? `<div class="tri-s"><b></b><i>경사 방향</i></div>` : ""}<div class="tri-u">${unit || ""}</div>`;
+      <div class="tri-v"><b></b><i>${kind === "lat" ? "앞뒤" : "수직"}</i></div><div class="tri-h"><b></b><i>${kind === "lat" ? "좌우" : "앞뒤"}</i></div>${kind === "spd" ? `<div class="tri-s"><b></b><i>경사 방향</i></div>` : ""}<div class="tri-u">${unit || ""}</div>`;
     this.waters = [...this.el.querySelectorAll(".water")];
     this.vb = this.el.querySelector(".tri-v b"); this.hb = this.el.querySelector(".tri-h b"); this.sb = this.el.querySelector(".tri-s b");
     deco.watch(this.el);
@@ -633,7 +633,7 @@ const ctl = {
       const d = Math.round(this.idet.est);
       if (d !== this.incl.deg) { this.incl.theta = this.idet.est; this.incl.deg = d; const ip = $("#inclPill"); if (ip) ip.textContent = `경사 ${d}°`; }
     }
-    if (this.incl && this.idet.u) { const b = this.idet.b, u = this.idet.u; this.of = this.cF.push((l - b[1]) * u[0] + (h - b[2]) * u[1]); }
+    if (this.incl && this.idet.u) { const b = this.idet.b, u = this.idet.u; this.of = this.cF.push((l - b[1]) * u[0] + (h - b[2]) * u[1]); this.ol = this.cL.push(-(l - b[1]) * u[1] + (h - b[2]) * u[0]); }
     const L = this.live;
     L.acc.push(o.acc); L.jerk.push(o.jerk); L.vibV.push(o.vibV); L.vibL.push(o.vibL); L.speed.push(o.speed);
     if (L.acc.length > LIVE_WIN * 2) for (const k in L) L[k].splice(0, LIVE_WIN);
@@ -717,7 +717,7 @@ const ctl = {
   inclReset(all) {
     if (all) this.incl = null;
     this.idet = new Core.InclineDetector(FS, this.incl ? this.incl.theta : null);
-    this.cF = new Core.AxisChannel(FS); this.of = null;
+    this.cF = new Core.AxisChannel(FS); this.cL = new Core.AxisChannel(FS, Core.P.LAT_HP); this.of = null; this.ol = null;
   },
   /** 경사형 감지 / 경사각 변화 (2026-11-26 사용자 확정): 반올림한 각도로 2도 이상 달라지면 변화 */
   onIncl(ev) {
@@ -913,10 +913,10 @@ const home = {
     // 실시간 숫자 표시 주기 (2026-11-25 사용자 확정): 가감속 1초에 15번, 속력 1초에 30번, 좌우 흔들림 2초에 1번
     const now = performance.now(), due = k => { const lt = this.liveAt || (this.liveAt = {}); if (lt[k] != null && now - lt[k] < LIVE_MS[k]) return false; lt[k] = now; return true; };
     if (this.tris) {
-      // 경사형: 왼쪽 변 = 수직, 아래 변 = 앞뒤. 물 높이 = 경사 방향(합친) 값 / 범례 (가감속 0.6 m/s², 흔들림 20 gal, 속력 90 m/min)
+      // 경사형: 왼쪽 변 = 수직, 아래 변 = 앞뒤 (흔들림만: 왼쪽 = 앞뒤, 아래 = 좌우). 물 높이 = 경사 방향(합친) 값 / 범례 (가감속 0.6 m/s², 흔들림 20 gal, 속력 90 m/min)
       const I = ctl.incl, rad = I.theta * Math.PI / 180, cot = 1 / Math.tan(rad), sn = Math.sin(rad), f = ctl.of, T = this.tris;
       if (due("acc")) { const av = Math.abs(o.acc), af = f ? Math.abs(f.acc) : av * cot; T.acc.vals(av.toFixed(2), af.toFixed(2)).level(Math.hypot(av, af) / LEGEND_INC.acc); }
-      if (due("lat")) { const pv = o.ppV, pf = f ? f.pp : 0; T.lat.vals(pv.toFixed(1), f ? pf.toFixed(1) : "—").level(Math.max(pv, pf) / LEGEND_INC.lat); }
+      if (due("lat")) { const pf = f ? f.pp : 0, pl = ctl.ol ? ctl.ol.pp : 0; T.lat.vals(f ? pf.toFixed(1) : "—", ctl.ol ? pl.toFixed(1) : "—").level(Math.max(pf, pl) / LEGEND_INC.lat); }
       if (due("spd")) { const sv = Math.abs(o.speed); T.spd.vals(sv.toFixed(1), (sv * cot).toFixed(1), (sv / sn).toFixed(1)).level(sv / sn / LEGEND_INC.spd); }
     } else if (this.trip) {
       if (due("acc")) this.trip.acc.level(Math.abs(o.acc) / LEGEND.acc).text(Math.abs(o.acc).toFixed(2), null, "m/s²");
@@ -1251,13 +1251,13 @@ const detail = {
   /** 경사형 간단히: 직각삼각형 게이지 3개 (왼쪽 변 수직, 아래 변 앞뒤) */
   simpleIncl(A) {
     const m = A.m, ev = m.eval, I = m.incl, body = $("#dBody"), sn = Math.sin(I.theta * Math.PI / 180);
-    const worse = [ev.vibV, ev.vibF, ev.vibL].filter(x => x && x.lv >= 0).sort((a, b) => b.lv - a.lv)[0] || { lv: -1, s: "기록이 없어요." };
+    const worse = [ev.vibF, ev.vibL].filter(x => x && x.lv >= 0).sort((a, b) => b.lv - a.lv)[0] || { lv: -1, s: "기록이 없어요." };
     const along = I.speedAlong != null ? I.speedAlong : m.speedMax / sn;
     const rows = [
       { k: "acc", lbl: "가감속도", u: "m/s²", v: Math.max(m.accMax, m.decMax).toFixed(2), f: Math.max(I.accMax, I.decMax).toFixed(2), lv: m.accPeak / sn / LEGEND_INC.acc,
         b: { lv: "n", t: ev.acc.t }, p: `가속 최대 ${m.accMax.toFixed(2)} · ${I.accMax.toFixed(2)}, 감속 최대 ${m.decMax.toFixed(2)} · ${I.decMax.toFixed(2)} m/s² (수직 · 앞뒤)` },
-      { k: "lat", lbl: "흔들림", u: "gal", v: m.vibV && m.vibV.n ? m.vibV.p98.toFixed(1) : "—", f: I.vibF.n ? I.vibF.p98.toFixed(1) : "—",
-        lv: Math.max(m.vibV ? m.vibV.p98 : 0, I.vibF.p98) / LEGEND_INC.lat, b: { lv: worse.lv, t: worse.s }, p: [ev.vibV.line, ev.vibF && ev.vibF.line].filter(Boolean).join("\n") },   // 위아래 줄 · 앞뒤 줄을 나눠서 (2026-11-26)
+      { k: "lat", lbl: "흔들림", u: "gal", v: I.vibF.n ? I.vibF.p98.toFixed(1) : "—", f: m.vibL && m.vibL.n ? m.vibL.p98.toFixed(1) : "—",
+        lv: Math.max(m.vibL ? m.vibL.p98 : 0, I.vibF.p98) / LEGEND_INC.lat, b: { lv: worse.lv, t: worse.s }, p: [ev.vibF && ev.vibF.line, ev.vibL && ev.vibL.line].filter(Boolean).join("\n") },   // 위아래 줄 · 앞뒤 줄을 나눠서 (2026-11-26)
       { k: "spd", lbl: "속력", u: "m/min", v: m.speedMax.toFixed(1), f: I.speedMax.toFixed(1), lv: along / LEGEND_INC.spd,
         b: { lv: "n", t: ev.speed.t }, p: I.changes.length ? "경사가 바뀌어 경사 방향 속력은 가장 빠를 때의 값이에요." : "" },
     ];
