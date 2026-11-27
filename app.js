@@ -4,7 +4,7 @@
 /* ───────── 상수 ───────── */
 const FS = Core.FS;
 /* 앱 버전 (2026-11-25 사용자 확정): 0.큰 기능 묶음.고친 횟수 — 웹 앱 확정 때 1.0.0, 안드로이드 앱 때 2.0.0 */
-const APP_VERSION = "0.13.16";
+const APP_VERSION = "0.13.17";
 const LEGEND = { acc: 1.5, lat: 30, latA: 20, spd: 600 };
 const LEGEND_INC = { acc: 1.0, lat: 80, spd: 90 };   // 경사형 게이지 범례 (2026-11-26 사용자 확정): 가감속 1.0 m/s², 흔들림 80 gal, 속력 90 m/min   // 물 높이 범례 (화면에 표시하지 않음). lat: 실시간 p-p, latA: 기록의 |98% 피크|
 const CUT = Math.round(Core.P.CUT_SEC * FS);
@@ -227,11 +227,28 @@ class Chart {
     this.ro = new ResizeObserver(() => this.draw()); this.ro.observe(canvas);
     // 오래 두거나 백그라운드에 다녀오면 브라우저가 캔버스를 비울 수 있다 → 되살아나면 다시 그린다
     canvas.addEventListener("contextrestored", () => this.draw());
+    // 화면 근처에 올 때까지 그리지 않는다 (2026-11-27): 기록 상세를 열 때 그래프 10여 개를 한꺼번에 그리느라 멈칫하던 것을 줄임
+    if (o.lazy && typeof IntersectionObserver !== "undefined") {
+      this.lazy = true;
+      const lz = new IntersectionObserver(es => { if (es.some(e => e.isIntersecting)) { lz.disconnect(); Chart.enqueue(this); } }, { rootMargin: "700px 0px" });
+      lz.observe(canvas);
+    }
     if (o.animate) {
       this.io = new IntersectionObserver(es => { if (es.some(e => e.isIntersecting)) { this.io.disconnect(); this.play(); } }, { threshold: 0.3 });
       this.io.observe(canvas);
     }
     if (o.tap) this.bindTap();
+  }
+  /** 늦게 그리는 그래프는 한 프레임에 하나씩 그린다 (한꺼번에 그리면 그 순간 화면이 멈칫한다) */
+  static enqueue(ch) {
+    (Chart.q = Chart.q || []).push(ch);
+    if (Chart.pumping) return; Chart.pumping = true;
+    const pump = () => {
+      const c = Chart.q.shift();
+      if (c) { c.lazy = false; if (c.c.isConnected) c.draw(); }
+      if (Chart.q.length) requestAnimationFrame(pump); else Chart.pumping = false;
+    };
+    requestAnimationFrame(pump);
   }
   /** 그리는 범위 [처음, 끝] (표본 번호) */
   range() { const n = (this.o.values || []).length; return [0, Math.max(n - 1, 1)]; }
@@ -272,6 +289,7 @@ class Chart {
     this.c.addEventListener("pointerup", end); this.c.addEventListener("pointercancel", end);
   }
   draw() {
+    if (this.lazy) return;
     const c = this.c, W = c.clientWidth, H = c.clientHeight; if (!W || !H) return;
     // 화면 그래프는 2배 해상도까지만 (3배면 그리는 데 두 배 가까이 걸린다). 영상용(hiRes)은 기기 해상도 그대로
     const dpr = this.o.hiRes ? (window.devicePixelRatio || 1) : Math.min(2, window.devicePixelRatio || 1);
@@ -806,7 +824,7 @@ const home = {
           <div class="stat glass"><div class="l">저크</div><div class="v" id="lvJ">0.00<small>m/s³</small></div></div>
           <div class="stat glass"><div class="l">상하 흔들림</div><div class="v" id="lvV">0.0<small>gal</small></div></div>
           <div class="stat glass"><div class="l">주행 거리</div><div class="v" id="lvD">0.0<small>m</small></div></div></div>
-        <div class="charts">${SERIES.map((s, i) => `<div class="chart-card glass fade-in" style="animation-delay:${0.1 + i * 0.08}s"><div class="h"><b>${s.title}</b><span>${s.unit}</span><em id="lv-${s.key}"></em></div><canvas class="chart" id="lc-${s.key}"></canvas></div>`).join("")}</div>`;
+        <div class="charts">${SERIES.map((s, i) => `<div class="chart-card glass fade-in"><div class="h"><b>${s.title}</b><span>${s.unit}</span><em id="lv-${s.key}"></em></div><canvas class="chart" id="lc-${s.key}"></canvas></div>`).join("")}</div>`;
       this.liveCharts = SERIES.map(s => new Chart($(`#lc-${s.key}`), { values: [], rate: FS, color: s.color, half: s.half, dec: s.dec, unit: s.unit, window: LIVE_WIN }));
       // 화면 밖 그래프는 그리지 않는다
       if (this.liveIO) this.liveIO.disconnect();
@@ -1318,7 +1336,7 @@ const detail = {
     const series = SERIES.filter(s => s.key !== "vibL" || m.vibL).concat(I ? SERIES_INC : []);
     const comment = { acc: ev.acc.s, jerk: ev.jerk.s, vibV: ev.vibV.s, vibL: ev.vibL ? ev.vibL.s : "", speed: ev.speed.s,
       fa: I ? (ev.fa.a === ev.fa.d ? ev.fa.a : `${ev.fa.a}·${ev.fa.d}`) : "", vibF: ev.vibF ? ev.vibF.s : "", speedF: I && I.changes.length ? "경사 변화 있음" : "" };
-    const card = (c, i) => `<div class="m6-card glass fade-in" style="animation-delay:${0.05 + i * 0.04}s">
+    const card = (c, i) => `<div class="m6-card glass fade-in">
         <div class="l">${c.l}</div>
         ${c.v2 ? `<div class="v2">${c.v2.map(([k, v]) => `<div><span>${k}</span><b>${v}</b></div>`).join("")}</div><div class="u">${c.u}</div>`
                : `<div class="v">${c.v}<small>${c.u}</small></div>`}
@@ -1342,7 +1360,7 @@ const detail = {
       <div class="charts">${series.map((s, i) => `<div class="chart-card glass fade-in" style="animation-delay:${0.1 + i * 0.08}s">
         <div class="h"><b>${s.title}</b><span>${s.unit}</span><em>${esc(comment[s.key] || "")}</em></div>
         <canvas class="chart" id="dc-${s.key}" style="height:180px"></canvas></div>`).join("")}</div>`;
-    series.forEach(s => new Chart($(`#dc-${s.key}`), { values: S[s.key], rate: r.rate, color: s.color, half: s.half, dec: s.dec, unit: s.unit, animate: true, tap: true, marks: s.key === "speed" || s.key === "speedF" ? "peak" : true, spans: (s.key === "vibV" || s.key === "vibL" || s.key === "vibF") && A.m.cruise.length ? A.m.cruise : null, pauses: A.m.pauses }));
+    series.forEach(s => new Chart($(`#dc-${s.key}`), { values: S[s.key], rate: r.rate, color: s.color, half: s.half, dec: s.dec, unit: s.unit, animate: !I, lazy: true, tap: true, marks: s.key === "speed" || s.key === "speedF" ? "peak" : true, spans: (s.key === "vibV" || s.key === "vibL" || s.key === "vibF") && A.m.cruise.length ? A.m.cruise : null, pauses: A.m.pauses }));
   },
 };
 

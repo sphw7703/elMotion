@@ -469,6 +469,8 @@ body { background: var(--page-bg); background-attachment: fixed; }
 .ai-chip { background: var(--navy-grad); color: var(--on-accent); box-shadow: 0 6px 16px -6px rgba(27,42,99,.6); }
 :root[data-ui="dark"] .ai-chip { box-shadow: 0 0 18px -4px rgba(91,140,255,.7); }
 .m6-card, .chart-card, .rec-card, .ai-box { border-radius: 22px; }
+/* 성능 (2026-11-27): 기록 상세의 카드·그래프 상자 20여 개에 뒷배경 흐림(backdrop-filter)을 쓰면 스크롤·등장 때 프레임이 크게 떨어진다 → 흐림만 빼고 모양은 같게 */
+.m6-card.glass, .chart-card.glass { -webkit-backdrop-filter: none; backdrop-filter: none; }
 /* AI 평가 (2026-11-25 사용자 확정): 레퍼런스(빛나는 유리 구슬)의 색과 질감
    · 칩(타원): 유리 안에서 번진 색 덩어리가 천천히 소용돌이치고, 윗면 광택 + 가는 빛 테두리 + 바깥으로 번지는 빛
    · 상자: 가는 무지개 테두리가 빙글 돌고, 그 테두리가 안팎으로 은은하게 번진다. 유리 안쪽 구석에 옅은 색이 비친다
