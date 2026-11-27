@@ -404,7 +404,7 @@ const videoMaker = (() => {
       m.jerk == null ? { l: "저크", v: "—", u: "", e: NO, lv: -1 } : { l: "저크", v: m.jerk.toFixed(2), u: "m/s³", e: ev.jerk.s, lv: ev.jerk.lv },
       { l: "가감속도", v2: [["가속", m.accMax.toFixed(2)], ["감속", m.decMax.toFixed(2)]], u: "m/s²", e2: [`가속 ${ev.acc.a}`, `감속 ${ev.acc.d}`], lv: -1 },
       { l: "속력", v: m.speedMax.toFixed(1), u: "m/min", e: ev.speed.card || (m.speedMax <= 500 ? `${ev.speed.s} 승강기` : ev.speed.s), lv: -1 },
-      { l: "운행 거리", v: m.distance.toFixed(1), u: "m", e: Math.round(m.distance / 3) >= 1 ? `건물 약 ${Math.round(m.distance / 3)}층 높이` : "거의 움직이지 않았어요", lv: -1 },
+      { l: "운행 거리", v: m.distance.toFixed(1), u: "m", e: Math.ceil(m.distance / 2.55 - 1e-9) >= 1 ? `건물 약 ${Math.ceil(m.distance / 2.55 - 1e-9)}층 높이` : "거의 움직이지 않았어요", lv: -1 },
       { l: "상하 흔들림", ...(m.vibV && m.vibV.n ? { v: m.vibV.p98.toFixed(1), u: "gal", e: ev.vibV.s, lv: ev.vibV.lv } : { v: "—", u: "", e: NO, lv: -1 }) },
       { l: "좌우 흔들림", ...(m.vibL && m.vibL.n ? { v: m.vibL.p98.toFixed(1), u: "gal", e: ev.vibL.s, lv: ev.vibL.lv } : { v: "—", u: "", e: NO, lv: -1 }) },
       { l: "출발 거칠기", ...gal(m.start, ev.start) }, { l: "가감속 울렁임", ...gal(m.wave, ev.wave) }, { l: "도착 거칠기", ...gal(m.arrive, ev.arrive) },
@@ -412,7 +412,7 @@ const videoMaker = (() => {
     // 경사형 (2026-11-26 사용자 확정): 앱의 자세히와 같이 머리글 + 경사형 지표 6개 + '기본 지표 · 수직 방향' + 9개, 그래프에 앞뒤 2개
     let inclCards = [], heads = [];
     if (I) {
-      const sn = Math.sin(I.theta * Math.PI / 180), along = I.speedAlong != null ? I.speedAlong : m.speedMax / sn, floors = Math.round(m.distance / 3);
+      const sn = Math.sin(I.theta * Math.PI / 180), along = I.speedAlong != null ? I.speedAlong : m.speedMax / sn, floors = Math.ceil(m.distance / 2.55 - 1e-9);
       const slope = th => (th < 25 ? "완만한 편이에요" : th < 40 ? "보통 기울기예요" : "가파른 편이에요");
       inclCards = [
         { l: "경사도", v: I.changes.length ? [I.theta, ...I.changes.map(c => c.to)].map(v => v + "°").join("→") : `${I.theta}°`, small: I.changes.length > 0, u: "", e: I.changes.length ? `운행 중 ${I.changes.length}번 바뀌었어요` : slope(I.theta), lv: -1 },
