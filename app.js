@@ -4,7 +4,7 @@
 /* ───────── 상수 ───────── */
 const FS = Core.FS;
 /* 앱 버전 (2026-11-25 사용자 확정): 0.큰 기능 묶음.고친 횟수 — 웹 앱 확정 때 1.0.0, 안드로이드 앱 때 2.0.0 */
-const APP_VERSION = "0.13.21";
+const APP_VERSION = "0.13.22";
 const LEGEND = { acc: 1.5, lat: 30, latA: 20, spd: 600 };
 const LEGEND_INC = { acc: 1.0, lat: 80, spd: 90 };   // 경사형 게이지 범례 (2026-11-26 사용자 확정): 가감속 1.0 m/s², 흔들림 80 gal, 속력 90 m/min   // 물 높이 범례 (화면에 표시하지 않음). lat: 실시간 p-p, latA: 기록의 |98% 피크|
 const CUT = Math.round(Core.P.CUT_SEC * FS);
@@ -884,8 +884,8 @@ const home = {
   /** 대기 문구의 가운데를 화면 정가운데에 맞춘다 (위쪽 머리 높이만큼 내려가 있는 것을 끌어올림) */
   centerCaption() {
     const w = $("#capWrap"), c = $("#cap"); if (!w || !c || !w.offsetParent) return;
-    const prev = this.capDy || 0, r = c.getBoundingClientRect();
-    const dy = Math.round(innerHeight / 2 - (r.top + r.height / 2 - prev));
+    const prev = this.capDy || 0, r = c.getBoundingClientRect(), pt = ($("#pHome") || w).getBoundingClientRect().top;   // 페이지 윗단 기준: 플립은 페이지가 세로로 넘어가는 중에도 위치가 어긋나지 않게 (0.13.22)
+    const dy = Math.round(innerHeight / 2 - (r.top - pt + r.height / 2 - prev));
     if (dy !== prev) { this.capDy = dy; w.style.transform = `translateY(${dy}px)`; }
   },
   updateSingle() {
@@ -1044,15 +1044,15 @@ const records = {
     const list = $("#recList"), q = this.searching ? this.q.trim().toLowerCase() : "";
     this.items = q ? this.all.filter(m => this.hayOf(m).some(h => finder.find(q, h))) : this.all;
     if (!this.all.length) {
-      list.innerHTML = `<div class="empty">아직 측정 기록이 없어요.<br>홈에서 휴대폰을 내려놓으면 측정이 시작돼요.</div>`;
+      this._key = ""; list.innerHTML = `<div class="empty">아직 측정 기록이 없어요.<br>홈에서 휴대폰을 내려놓으면 측정이 시작돼요.</div>`;
       return;
     }
     if (!this.items.length) {
-      list.innerHTML = `<div class="empty">‘${esc(this.q.trim())}’ 검색 결과가 없어요.</div>`;
+      this._key = ""; list.innerHTML = `<div class="empty">‘${esc(this.q.trim())}’ 검색 결과가 없어요.</div>`;
       return;
     }
     list.classList.toggle("selecting", !!this.selecting);
-    list.innerHTML = this.items.map((m, k) => {
+    const html = this.items.map((m, k) => {
       const lv = (v, key) => (v > 0 ? clamp(v / LEGEND[key], 0.06, 1) : 0) * 100;
       const lat = m.latP98 == null ? "—" : m.latP98.toFixed(1);
       const fitMini = t => (t.length >= 6 ? ' style="font-size:10.5px"' : t.length === 5 ? ' style="font-size:12px"' : "");   // 239.6처럼 긴 숫자는 원 안에 들어가게 줄임
@@ -1072,6 +1072,9 @@ const records = {
           <div class="mini k-spd" style="--lv:${lv(m.speedMax, "spd")}%"><span class="ms"><b${fitMini(m.speedMax.toFixed(1))}>${m.speedMax.toFixed(1)}</b><i>m/min</i></span></div>`}</div>
           <div class="rc-line">${esc(firstSentence(m.overall))}</div></div></article>`;
     }).join("");
+    const key = html.replace(/(gw|s|m)?(tm|tg)\d+/g, "#");   // 게이지마다 매번 새로 붙는 번호는 비교에서 뺀다
+    if (key === this._key && list.firstElementChild) return;   // 같은 내용이면 다시 그리지 않는다: 탭을 오갈 때 삼각형 게이지 이미지가 다시 불러와져 깜빡이던 문제 (0.13.22)
+    this._key = key; list.innerHTML = html;
     if (anim) stagger(list, 12);
     list.querySelectorAll(".rec-card").forEach(card => {
       const id = card.dataset.id, k = +card.dataset.k;
