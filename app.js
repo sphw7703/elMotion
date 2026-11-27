@@ -4,7 +4,7 @@
 /* ───────── 상수 ───────── */
 const FS = Core.FS;
 /* 앱 버전 (2026-11-25 사용자 확정): 0.큰 기능 묶음.고친 횟수 — 웹 앱 확정 때 1.0.0, 안드로이드 앱 때 2.0.0 */
-const APP_VERSION = "0.13.22";
+const APP_VERSION = "0.13.23";
 const LEGEND = { acc: 1.5, lat: 30, latA: 20, spd: 600 };
 const LEGEND_INC = { acc: 1.0, lat: 80, spd: 90 };   // 경사형 게이지 범례 (2026-11-26 사용자 확정): 가감속 1.0 m/s², 흔들림 80 gal, 속력 90 m/min   // 물 높이 범례 (화면에 표시하지 않음). lat: 실시간 p-p, latA: 기록의 |98% 피크|
 const CUT = Math.round(Core.P.CUT_SEC * FS);
@@ -1740,7 +1740,17 @@ const heal = {
     if (WIDE_MQ && WIDE_MQ.addEventListener) WIDE_MQ.addEventListener("change", () => this.run(true));
     setInterval(() => { if (!document.hidden) this.run(false); }, 60000);
   },
+  /** 화면 종류가 바뀔 때만 전환 효과 (끔·중사양에서만, 저사양은 즉시) */
   run(force) {
+    if (uiMode() !== document.documentElement.dataset.layout && !lowSpec.none() && !document.hidden
+        && !(window.matchMedia && matchMedia("(prefers-reduced-motion: reduce)").matches)) {
+      if (document.startViewTransition) { try { const t = document.startViewTransition(() => this.apply(force)); [t.ready, t.finished, t.updateCallbackDone].forEach(q => q && q.catch && q.catch(() => {})); return; } catch (e) {} }
+      const app = document.querySelector(".app");
+      if (app) { app.classList.remove("ui-swap"); void app.offsetWidth; app.classList.add("ui-swap"); setTimeout(() => app.classList.remove("ui-swap"), 520); }
+    }
+    this.apply(force);
+  },
+  apply(force) {
     const flip = applyMode();
     if (flip) {
       home.layout = ""; home.render();                                   // 측정 중이어도 배치를 다시 (실시간 값은 다음 틱에 다시 채워짐)

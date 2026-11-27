@@ -55,3 +55,4 @@
 
 - 0.13.22/v85 (미배포): 기록 탭 전환 때마다 records.render()가 목록을 통째로 다시 그려 삼각형 게이지 SVG 이미지가 다시 로드되며 깜빡임 → draw()에서 게이지 id(tm/tg/gw/s/m+번호)를 뺀 내용이 같으면 다시 그리지 않음. glass-tri/sil preload 추가.
 - 0.13.22 추가: 플립에서 다른 탭→홈 전환 시 대기 문구가 페이지 이동 중 좌표로 계산돼 화면 밖(-426px)으로 1.5초간 밀리던 문제 → centerCaption이 #pHome 윗단 기준으로 계산.
+- 0.13.23/v86 (미배포): 화면 종류(일반/태블릿/폴더블/플립) 전환 효과. heal.run→View Transition(교차 페이드), 미지원 시 .app.ui-swap(페이드+확대+블러). 저사양(none)과 reduced-motion은 즉시 전환.
