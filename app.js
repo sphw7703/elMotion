@@ -4,7 +4,7 @@
 /* ───────── 상수 ───────── */
 const FS = Core.FS;
 /* 앱 버전 (2026-11-25 사용자 확정): 0.큰 기능 묶음.고친 횟수 — 웹 앱 확정 때 1.0.0, 안드로이드 앱 때 2.0.0 */
-const APP_VERSION = "0.13.18";
+const APP_VERSION = "0.13.19";
 const LEGEND = { acc: 1.5, lat: 30, latA: 20, spd: 600 };
 const LEGEND_INC = { acc: 1.0, lat: 80, spd: 90 };   // 경사형 게이지 범례 (2026-11-26 사용자 확정): 가감속 1.0 m/s², 흔들림 80 gal, 속력 90 m/min   // 물 높이 범례 (화면에 표시하지 않음). lat: 실시간 p-p, latA: 기록의 |98% 피크|
 const CUT = Math.round(Core.P.CUT_SEC * FS);
@@ -48,10 +48,13 @@ const prefs = {
   set(k, v) { try { localStorage.setItem("elmotion." + k, v); } catch (e) { /* 저장 불가 환경 */ } },
 };
 
-/** 저사양 모드 (2026-11-27): 기록 상세의 효과를 줄여 프레임 드랍을 막는다. 설정에서 켜고 끈다 (기본 꺼짐) */
+/** 성능 모드 (2026-11-27): 기록 상세의 효과를 줄여 프레임 드랍을 막는다. 설정에서 고른다 (기본 꺼짐)
+    "0" 끔 · "2" 중사양(그래프 늦게 그리기·유리 효과 끔, AI 회전은 유지) · "1" 저사양(중사양 + 모든 애니메이션 끔) */
 const lowSpec = {
-  on() { return prefs.get("lowspec", "0") === "1"; },
-  apply() { document.documentElement.classList.toggle("lowspec", this.on()); },
+  level() { const v = prefs.get("lowspec", "0"); return v === "1" || v === "2" ? v : "0"; },
+  on() { return this.level() !== "0"; },
+  none() { return this.level() === "1"; },
+  apply() { const c = document.documentElement.classList; c.toggle("lowspec", this.on()); c.toggle("lowspec-none", this.none()); },
 };
 lowSpec.apply();
 
@@ -1343,7 +1346,7 @@ const detail = {
     const series = SERIES.filter(s => s.key !== "vibL" || m.vibL).concat(I ? SERIES_INC : []);
     const comment = { acc: ev.acc.s, jerk: ev.jerk.s, vibV: ev.vibV.s, vibL: ev.vibL ? ev.vibL.s : "", speed: ev.speed.s,
       fa: I ? (ev.fa.a === ev.fa.d ? ev.fa.a : `${ev.fa.a}·${ev.fa.d}`) : "", vibF: ev.vibF ? ev.vibF.s : "", speedF: I && I.changes.length ? "경사 변화 있음" : "" };
-    const LOW = lowSpec.on();
+    const LOW = lowSpec.on(), NOANI = lowSpec.none();
     const card = (c, i) => `<div class="m6-card glass fade-in"${LOW ? "" : ` style="animation-delay:${0.05 + i * 0.04}s"`}>
         <div class="l">${c.l}</div>
         ${c.v2 ? `<div class="v2">${c.v2.map(([k, v]) => `<div><span>${k}</span><b>${v}</b></div>`).join("")}</div><div class="u">${c.u}</div>`
@@ -1368,7 +1371,7 @@ const detail = {
       <div class="charts">${series.map((s, i) => `<div class="chart-card glass fade-in" style="animation-delay:${0.1 + i * 0.08}s">
         <div class="h"><b>${s.title}</b><span>${s.unit}</span><em>${esc(comment[s.key] || "")}</em></div>
         <canvas class="chart" id="dc-${s.key}" style="height:180px"></canvas></div>`).join("")}</div>`;
-    series.forEach(s => new Chart($(`#dc-${s.key}`), { values: S[s.key], rate: r.rate, color: s.color, half: s.half, dec: s.dec, unit: s.unit, animate: !(LOW && I), lazy: LOW, tap: true, marks: s.key === "speed" || s.key === "speedF" ? "peak" : true, spans: (s.key === "vibV" || s.key === "vibL" || s.key === "vibF") && A.m.cruise.length ? A.m.cruise : null, pauses: A.m.pauses }));
+    series.forEach(s => new Chart($(`#dc-${s.key}`), { values: S[s.key], rate: r.rate, color: s.color, half: s.half, dec: s.dec, unit: s.unit, animate: !(LOW && I) && !NOANI, lazy: LOW, tap: true, marks: s.key === "speed" || s.key === "speedF" ? "peak" : true, spans: (s.key === "vibV" || s.key === "vibL" || s.key === "vibF") && A.m.cruise.length ? A.m.cruise : null, pauses: A.m.pauses }));
   },
 };
 
@@ -1385,10 +1388,14 @@ const settings = {
       <p>측정 기록은 이 기기의 브라우저 저장소에 보관돼요. 브라우저 데이터를 지우면 함께 지워져요.</p>
       <p>측정값은 휴대폰 센서로 구한 참고값이에요. 공식 승차감 검사를 대신하지 않아요.</p>
       <div class="acts"><button class="solid" id="dOk">확인</button></div>`, (b, close) => { b.querySelector("#dOk").onclick = close; });
-    const sw = $("#lowSw");
-    if (sw) {
-      const show = () => sw.setAttribute("aria-checked", lowSpec.on() ? "true" : "false");
-      show(); sw.onclick = () => { prefs.set("lowspec", lowSpec.on() ? "0" : "1"); lowSpec.apply(); show(); toast(lowSpec.on() ? "저사양 모드를 켰어요. 기록 상세부터 적용돼요." : "저사양 모드를 껐어요."); };
+    const ps = $("#perfSeg");
+    if (ps) {
+      const show = () => ps.querySelectorAll("button").forEach(b => { const on = b.dataset.perf === lowSpec.level(); b.classList.toggle("on", on); b.setAttribute("aria-pressed", on ? "true" : "false"); });
+      show();
+      ps.querySelectorAll("button").forEach(b => b.onclick = () => {
+        prefs.set("lowspec", b.dataset.perf); lowSpec.apply(); show();
+        toast({ "0": "성능 모드를 껐어요.", "2": "중사양 모드를 켰어요. 기록 상세부터 적용돼요.", "1": "저사양 모드를 켰어요. 기록 상세부터 적용돼요." }[b.dataset.perf]);
+      });
     }
     this.renderMode();
     // 데모 측정: 홈으로 가서 데모 신호로 측정 (일반 / 경사형)

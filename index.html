@@ -517,7 +517,10 @@ body { background: var(--page-bg); background-attachment: fixed; }
 :root[data-ui="dark"] .ai-glow { opacity: .75; filter: blur(9px); }
 @media (prefers-reduced-motion: reduce) { .ai-box .ai-chip::before, .ai-box.glass::before, .ai-glow i { animation: none; } }
 /* 저사양 모드 (2026-11-27): AI 알약의 소용돌이와 상자 테두리·빛 번짐의 회전을 멈춘다 */
-:root.lowspec .ai-box .ai-chip::before, :root.lowspec .ai-box.glass::before, :root.lowspec .ai-glow i { animation: none; }
+#perfSeg button { padding: 0 11px; font-size: 13px; }
+#perfSeg button.on { background: var(--navy-grad); box-shadow: 0 6px 14px -6px rgba(27,42,99,.6); }
+:root.lowspec-none *, :root.lowspec-none *::before, :root.lowspec-none *::after { animation: none !important; transition: none !important; }
+:root.lowspec-none .pop { opacity: 1; transform: none; }
 /* 성능 ③ (2026-11-26): 화면 밖이거나 스크롤하는 동안에는 장식 애니메이션(AI 테두리·칩 소용돌이·게이지 물결)을 멈춘다 */
 :root.scrolling .ai-box.glass::before, :root.scrolling .ai-glow i, :root.scrolling .ai-box .ai-chip::before,
 :root.scrolling .sphere .w1, :root.scrolling .sphere .wl, :root.scrolling .tri .w1, :root.scrolling .tri .wl,
@@ -718,8 +721,8 @@ body.selecting #recList { padding-bottom: 150px; }
         </div>
         <div class="set-card glass">
           <div class="set-row">
-            <div class="t"><h3 style="margin:0">저사양 모드</h3><p>기록 상세의 효과를 줄여 끊김을 막아요</p></div>
-            <button class="switch" id="lowSw" role="switch" aria-checked="false" aria-label="저사양 모드"><i></i></button>
+            <div class="t"><h3 style="margin:0">성능 모드</h3><p>중사양: 효과를 줄여요 · 저사양: 애니메이션도 꺼요</p></div>
+            <div class="seg" id="perfSeg"><button data-perf="0">끔</button><button data-perf="2">중사양</button><button data-perf="1">저사양</button></div>
           </div>
         </div>
         <div class="set-card glass" id="syncCard">
