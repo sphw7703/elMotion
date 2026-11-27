@@ -382,14 +382,17 @@ const videoMaker = (() => {
     // 장면 1: 간단히 게이지 3개
     const gauges = [
       { k: "acc", lbl: "가감속도", lv: m.accPeak / LEGEND.acc, a: m.accMax.toFixed(2), bv: m.decMax.toFixed(2), u: "m/s²" },
-      { k: "lat", lbl: "흔들림", cube: true, lv: vibMax(m) / LEGEND.cube, a: vibMax(m) > 0 ? "" : "—", c: [ppTxt(m.vibV), ppTxt(m.vibF), ppTxt(m.vibL)], bv: null, u: "gal" },   // 큐브 (2026-11-27)
+      cubeUi(rec, m)
+        ? { k: "lat", lbl: "흔들림", cube: true, lv: vibMax(m) / LEGEND.cube, a: vibMax(m) > 0 ? "" : "—", c: [ppTxt(m.vibV), ppTxt(m.vibF), ppTxt(m.vibL)], bv: null, u: "gal" }   // 큐브 (2026-11-27)
+        : { k: "lat", lbl: "좌우 흔들림", lv: m.vibL && m.vibL.n ? m.vibL.pp95 / LEGEND.latA : 0, a: m.vibL && m.vibL.n ? m.vibL.pp95.toFixed(1) : "—", bv: null, u: "gal" },   // 예전 구슬 (큐브 이전 기록)
       { k: "spd", lbl: "속력", lv: m.speedMax / LEGEND.spd, a: m.speedMax.toFixed(1), bv: null, u: "m/min" },
     ];
     // 게이지 아래 글 (간단히 화면과 같은 내용): 위 라벨은 앱의 3배, 아래 글은 2배 (1920 폭 기준 76 · 64 · 44px)
     const sent = x => (/[.!?요]$/.test(x) ? (/[요]$/.test(x) ? x + "." : x) : x + ".");
     const accB = /^가속은 .+ 감속은 /.test(ev.acc.t) ? ev.acc.t.replace(/ 감속은 /, ",\n감속은 ").split("\n").map((l, i) => (i ? sent(l) : l)) : [sent(ev.acc.t)];
     gauges[0].b = accB; gauges[0].bl = -1; gauges[0].p = "";                                     // '가속 최대 ~' 줄은 뺌 (사용자 확정)
-    if (vibMax(m) > 0) { const w = worstVib(ev); gauges[1].b = [w.t]; gauges[1].bl = w.lv; gauges[1].bScale = 1.3; /* '좋음' 같은 등급 글자는 130% */ gauges[1].p = ev.vibL ? ev.vibL.line.replace(/ · 약 [\d.]+ Hz$/, "") : ""; /* '약 7.5 Hz'는 뺌 */ }
+    if (!gauges[1].cube) { if (m.vibL && m.vibL.n) { gauges[1].b = [ev.vibL.s]; gauges[1].bl = ev.vibL.lv; gauges[1].bScale = 1.3; gauges[1].p = ev.vibL.line.replace(/ · 약 [\d.]+ Hz$/, ""); } else { gauges[1].b = ["기록이 없어요."]; gauges[1].bl = -1; gauges[1].p = ""; } }
+    else if (vibMax(m) > 0) { const w = worstVib(ev); gauges[1].b = [w.t]; gauges[1].bl = w.lv; gauges[1].bScale = 1.3; /* '좋음' 같은 등급 글자는 130% */ gauges[1].p = ev.vibL ? ev.vibL.line.replace(/ · 약 [\d.]+ Hz$/, "") : ""; /* '약 7.5 Hz'는 뺌 */ }
     else { gauges[1].b = ["기록이 없어요."]; gauges[1].bl = -1; gauges[1].p = ""; }
     gauges[2].b = [ev.speed.t.replace(/요$/, "요.")]; gauges[2].bl = 0; gauges[2].p = "";
     // 경사형 (2026-11-26 사용자 확정): 앱의 간단히와 같은 직각삼각형 게이지 (왼쪽 변 수직, 아래 변 앞뒤)

@@ -4,7 +4,7 @@
 /* ───────── 상수 ───────── */
 const FS = Core.FS;
 /* 앱 버전 (2026-11-25 사용자 확정): 0.큰 기능 묶음.고친 횟수 — 웹 앱 확정 때 1.0.0, 안드로이드 앱 때 2.0.0 */
-const APP_VERSION = "0.14.1";
+const APP_VERSION = "0.14.2";
 const LEGEND = { acc: 1.5, lat: 30, latA: 20, spd: 600, cube: 30 };   // cube: 흔들림 큐브 물 높이 (가중 p-p, 25 gal 넘으면 매우 나쁨)
 const LEGEND_INC = { acc: 1.0, lat: 80, spd: 90, cube: 60 };   // 경사형 게이지 범례 (2026-11-26 사용자 확정): 가감속 1.0 m/s², 흔들림 80 gal, 속력 90 m/min   // 물 높이 범례 (화면에 표시하지 않음). lat: 실시간 p-p, latA: 기록의 |98% 피크|
 const CUT = Math.round(Core.P.CUT_SEC * FS);
@@ -295,6 +295,8 @@ class CubeGauge {
 /** 흔들림 기록값 → 큐브 글자 */
 const ppTxt = t => (t && t.n ? t.pp95.toFixed(1) : "—");
 /** 세 축 중 가장 큰 흔들림 (경사형의 앞뒤는 경사 방향) */
+/** 큐브 게이지를 쓰는 기록: 0.14.2부터 새로 측정한 기록(cube 표시)과 경사형. 그 전에 측정했거나 가져온 기록은 예전 구슬 게이지 (2026-11-27 사용자 요청) */
+const cubeUi = (rec, m) => !!(m && m.incl) || !!(rec && rec.cube);
 const vibMax = m => Math.max(...[m.vibV, m.incl ? m.incl.vibF : m.vibF, m.vibL].map(t => (t && t.n ? t.pp95 : 0)));
 /** 세 축 중 가장 나쁜 등급 */
 const worstVib = ev => { const w = [ev.vibV, ev.vibF, ev.vibL].filter(x => x && x.lv >= 0).sort((a, b) => b.lv - a.lv)[0]; return w ? { lv: w.lv, t: w.s } : { lv: "n", t: "기록이 없어요." }; };
@@ -820,7 +822,7 @@ const ctl = {
     if (n < FS) { toast("측정 시간이 너무 짧아 저장하지 않았어요."); return; }
     if (reason === "abnormal") { toast("비정상적인 흔들림이 감지되어 측정을 종료했어요.", 4200); try { navigator.vibrate && navigator.vibrate(60); } catch (e) { /* 무시 */ } }
     const rec = { id: `ride_${this.startedAt}_${Math.random().toString(36).slice(2, 6)}`, name: demo ? "데모 측정" : "", startedAt: this.startedAt, rate: FS, demo,
-      vert: Float32Array.from(this.vert.slice(0, n)), lat: Float32Array.from(this.lat.slice(0, n)), lon: Float32Array.from(this.lon.slice(0, n)), updatedAt: Date.now() };
+      vert: Float32Array.from(this.vert.slice(0, n)), lat: Float32Array.from(this.lat.slice(0, n)), lon: Float32Array.from(this.lon.slice(0, n)), updatedAt: Date.now(), cube: 1 };
     if (segs.length > 1) rec.segs = segs;
     try { await store.put(rec); } catch (e) { toast("기록을 저장하지 못했어요."); }
     records.render();
@@ -1406,7 +1408,11 @@ const detail = {
     const m = A.m, ev = m.eval, body = $("#dBody");
     const rows = [
       { k: "acc", lbl: "가감속도", lv: m.accPeak / LEGEND.acc, n1: m.accMax.toFixed(2), n2: m.decMax.toFixed(2), u: "m/s²", b: { lv: "n", t: ev.acc.t } },
-      { k: "lat", lbl: "흔들림", cube: true, lv: vibMax(m) / LEGEND.cube, c: [ppTxt(m.vibV), ppTxt(m.vibF), ppTxt(m.vibL)], b: worstVib(ev) },
+      cubeUi(this.rec, m)
+        ? { k: "lat", lbl: "흔들림", cube: true, lv: vibMax(m) / LEGEND.cube, c: [ppTxt(m.vibV), ppTxt(m.vibF), ppTxt(m.vibL)], b: worstVib(ev) }
+        : m.vibL && m.vibL.n
+          ? { k: "lat", lbl: "좌우 흔들림", lv: m.vibL.pp95 / LEGEND.latA, n1: m.vibL.pp95.toFixed(1), u: "gal", b: { lv: ev.vibL.lv, t: ev.vibL.s } }
+          : { k: "lat", lbl: "좌우 흔들림", lv: 0, n1: "—", u: "gal", b: { lv: "n", t: "기록이 없어요." } },
       { k: "spd", lbl: "속력", lv: m.speedMax / LEGEND.spd, n1: m.speedMax.toFixed(1), u: "m/min", b: ev.speed },
     ];   // 게이지 오른쪽의 작은 회색 글은 뺌 (2026-11-27 사용자 요청)
     const size = isFlip() ? Math.round(clamp((innerWidth - 36) / 3.4, 66, 104)) : isWide() ? Math.round(clamp(Math.min(innerHeight * 0.4, innerWidth / 5.2), 160, 280)) : Math.round(clamp(innerWidth * 0.36, 120, 160));
