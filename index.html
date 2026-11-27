@@ -658,6 +658,88 @@ body.selecting #recList { padding-bottom: 150px; }
 .vid-bar { height: 8px; border-radius: 4px; background: var(--surface-2); overflow: hidden; margin: 4px 0 6px; }
 .vid-bar i { display: block; height: 100%; width: 0; background: var(--navy-grad); transition: width .2s; }
 #appVer { cursor: default; }
+
+/* ═════ 폴더블 커버 (세로로 아주 긴 22:9급 화면) ═════ */
+:root.ui-fold .page { padding: 0 14px 20px; }
+:root.ui-fold .act-row { gap: 4px; }
+:root.ui-fold .tog-text { font-size: 13px; padding: 0 4px; }
+:root.ui-fold .act-row .pill-btn.round { width: 40px; }
+:root.ui-fold .act-row .pill-btn:not(.round) { padding: 0 11px; font-size: 13px; }
+:root.ui-fold .rc-body { flex-direction: column; align-items: stretch; gap: 8px; }
+:root.ui-fold .minis { justify-content: space-evenly; }
+:root.ui-fold .rc-line, :root.ui-fold .rc-body:has(.mini-tri) .rc-line { margin-left: 0; text-align: center; font-size: 14px; }
+:root.ui-fold .m6 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+:root.ui-fold .sheet-in { padding-left: 14px; padding-right: 14px; }
+/* ═════ 플립 커버 (거의 정사각 작은 화면). 위아래로 쓸어 쪽 이동, 하단 바는 오른쪽, 자세히는 가로로 한 쪽씩 ═════ */
+:root.ui-flip .app { flex-direction: row; max-width: none; padding-top: 0; }
+:root.ui-flip .pager-wrap { flex: 1; min-width: 0; }
+:root.ui-flip .pager { flex-direction: column; width: 100%; height: 300%; }
+:root.ui-flip .page { width: 100%; height: 33.3334%; padding: 0 16px 8px 12px; }
+:root.ui-flip .single { width: 100%; }
+:root.ui-flip #pHome { overflow: hidden; }
+:root.ui-flip .top { height: 44px; gap: 6px; }
+:root.ui-flip .top h2 { font-size: 18px; }
+:root.ui-flip .top .round-btn { width: 34px; height: 34px; }
+:root.ui-flip .live-pill, :root.ui-flip .live-pill.glass { height: 30px; font-size: 13px; padding: 0 10px 0 8px; }
+:root.ui-flip .nav { order: 2; flex: none; flex-direction: column; justify-content: center; gap: 2px; width: 56px; height: auto; align-self: center; margin: 0 8px 0 0; padding: 4px 0; border-radius: 28px; }
+:root.ui-flip .nav button { width: 52px; height: 52px; }
+:root.ui-flip .nav img { width: 30px; height: 30px; }
+:root.ui-flip .nav button.mid img { width: 33px; height: 33px; }
+:root.ui-flip .nav-orb { left: -12px; top: 0; width: 52px; height: 52px; box-shadow: 0 0 0 4px var(--bg), 0 10px 22px -8px rgba(27,42,99,.6); }
+:root.ui-flip .nav button.on img { transform: translateX(-13px) scale(1.06); }
+:root.ui-flip .home-body { min-height: 0; width: 100%; }
+:root.ui-flip .home-actions { padding: 4px 0 2px; gap: 6px; }
+:root.ui-flip #bTog, :root.ui-flip #dTog { display: none; }
+:root.ui-flip .pill-btn { height: 34px; padding: 0 12px; font-size: 13px; }
+:root.ui-flip .pill-btn.round { width: 34px; padding: 0; }
+:root.ui-flip .single { min-height: 0; }
+:root.ui-flip .single .caption { font-size: 20px; min-height: 26px; }
+:root.ui-flip .single .sub { font-size: 12.5px; max-width: 220px; }
+:root.ui-flip .lift { --lw: 92px; }
+:root.ui-flip .triple { flex: 1; flex-direction: row; justify-content: center; align-items: center; gap: 4px; padding: 0; }
+:root.ui-flip .triple .lbl { font-size: 12px; }
+:root.ui-flip .incl { flex: 1; justify-content: center; }
+:root.ui-flip .incl-msg { width: min(240px, 90%); }
+:root.ui-flip .incl .tris { flex-direction: row; justify-content: center; align-items: flex-start; gap: 0; }
+:root.ui-flip .incl .item { width: calc(var(--d) * 1.25); align-items: flex-start; }
+:root.ui-flip .incl .item .lbl { font-size: 13px; margin-bottom: 4px; align-self: flex-start; margin-left: calc(var(--d) * .24); width: var(--d); text-align: center; }
+:root.ui-flip .incl .item .lbl small { font-size: 10px; }
+:root.ui-flip .incl .item .g { padding: 0 0 20px calc(var(--d) * .24); }
+:root.ui-flip .rc-body { flex-direction: column; align-items: stretch; gap: 6px; margin-top: 8px; padding-top: 8px; }
+:root.ui-flip .minis { justify-content: space-evenly; }
+:root.ui-flip .rc-line, :root.ui-flip .rc-body:has(.mini-tri) .rc-line { margin-left: 0; text-align: center; font-size: 12.5px; }
+:root.ui-flip .rec-card { padding: 10px 8px 10px 12px; }
+:root.ui-flip .set-card { padding: 12px; }
+:root.ui-flip .sheet-in { max-width: none; padding: 0 10px 10px 12px; }
+:root.ui-flip .ai-box { padding: 10px 12px; }
+:root.ui-flip .ai-box p { font-size: 13.5px; line-height: 20px; }
+:root.ui-flip .d-rows { flex-direction: row; justify-content: space-around; align-items: flex-start; gap: 4px; }
+:root.ui-flip .d-row { flex: 1; min-width: 0; grid-template-columns: 1fr; justify-items: center; text-align: center; gap: 6px; border-top: 0; padding: 6px 0; }
+:root.ui-flip .d-row .lbl { font-size: 11.5px; }
+:root.ui-flip .d-row .ev b { font-size: 12.5px; }
+:root.ui-flip .d-row .ev p { font-size: 11px; }
+:root.ui-flip .incl-rows .d-row { grid-template-columns: 1fr; }
+/* 자세히 (가로 쪽 넘기기) */
+.fl-strip { display: flex; width: 100%; flex: 1; min-height: 0; overflow-x: auto; overflow-y: hidden; scroll-snap-type: x mandatory; touch-action: pan-x; overscroll-behavior: contain; }
+.fl-pg { flex: 0 0 100%; min-width: 0; height: 100%; scroll-snap-align: start; scroll-snap-stop: always; padding: 2px 3px; display: flex; flex-direction: column; justify-content: center; }
+.fl-dots { display: flex; justify-content: center; gap: 5px; padding: 6px 0 2px; flex: none; }
+.fl-dots i { width: 6px; height: 6px; border-radius: 3px; background: var(--ink-3); opacity: .4; transition: width .25s, opacity .25s; }
+.fl-dots i.on { width: 16px; opacity: 1; background: var(--accent); }
+.m4 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); grid-template-rows: repeat(2, minmax(0, 1fr)); gap: 8px; height: 100%; }
+.m4 .m6-card { min-height: 0; padding: 8px 10px; overflow: hidden; }
+.m4 .m6-card .l { font-size: 12px; }
+.m4 .m6-card .v { font-size: 24px; margin-top: 2px; }
+.m4 .m6-card .v2 { margin-top: 2px; }
+.m4 .m6-card .v2 b { font-size: 17px; }
+.m4 .m6-card .e { padding-top: 2px; font-size: 11px; }
+.fl-pg .chart-card { flex: 1; min-height: 0; display: flex; flex-direction: column; padding: 10px 0 4px; }
+.fl-pg .chart-card .h b { font-size: 15px; }
+.fl-pg canvas.chart { touch-action: auto; flex: 1; min-height: 0; height: auto !important; }
+.fl-pg .stat-row { grid-template-columns: 1fr; gap: 8px; }
+.fl-pg .stat { display: flex; align-items: baseline; justify-content: space-between; padding: 12px 14px; }
+:root.ui-flip .sheet-in.fl-full { display: flex; flex-direction: column; overflow: hidden; }
+:root.ui-flip .fl-full .ai-box, :root.ui-flip .fl-full .toggle-wrap { display: none; }
+:root.ui-flip .fl-full #dBody { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 </style>
 </head>
 <body>
@@ -721,7 +803,7 @@ body.selecting #recList { padding-bottom: 150px; }
         </div>
         <div class="set-card glass">
           <div class="set-row">
-            <div class="t"><h3 style="margin:0">성능 모드</h3><p>중사양: 효과를 줄여요 · 저사양: 애니메이션도 꺼요</p></div>
+            <div class="t"><h3 style="margin:0">성능 모드</h3></div>
             <div class="seg" id="perfSeg"><button data-perf="0">끔</button><button data-perf="2">중사양</button><button data-perf="1">저사양</button></div>
           </div>
         </div>

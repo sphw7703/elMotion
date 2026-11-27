@@ -4,7 +4,7 @@
 /* ───────── 상수 ───────── */
 const FS = Core.FS;
 /* 앱 버전 (2026-11-25 사용자 확정): 0.큰 기능 묶음.고친 횟수 — 웹 앱 확정 때 1.0.0, 안드로이드 앱 때 2.0.0 */
-const APP_VERSION = "0.13.20";
+const APP_VERSION = "0.13.21";
 const LEGEND = { acc: 1.5, lat: 30, latA: 20, spd: 600 };
 const LEGEND_INC = { acc: 1.0, lat: 80, spd: 90 };   // 경사형 게이지 범례 (2026-11-26 사용자 확정): 가감속 1.0 m/s², 흔들림 80 gal, 속력 90 m/min   // 물 높이 범례 (화면에 표시하지 않음). lat: 실시간 p-p, latA: 기록의 |98% 피크|
 const CUT = Math.round(Core.P.CUT_SEC * FS);
@@ -22,8 +22,24 @@ const fmtDur = s => s >= 60 ? `${Math.floor(s / 60)}분 ${p2(Math.floor(s % 60))
 const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
 /* 가로 화면 (태블릿 등): 가로가 세로보다 길고 충분히 넓으면 가로 전용 배치 */
 const WIDE_MQ = window.matchMedia ? matchMedia("(orientation: landscape) and (min-width: 820px) and (min-height: 400px)") : null;
-const isWide = () => !!(WIDE_MQ && WIDE_MQ.matches);
-document.documentElement.classList.toggle("wide", isWide());
+/** 화면 종류 (해상도·비율·가로세로 회전으로 판단): flip 플립 커버(거의 정사각) · fold 폴더블 커버(세로로 아주 긴 22:9급) · wide 태블릿 가로 · phone 일반 */
+const uiMode = () => {
+  const w = innerWidth, h = innerHeight, lo = Math.min(w, h), hi = Math.max(w, h);
+  if (lo > 0 && hi / lo <= 1.3 && hi <= 640) return "flip";
+  if (w < h && h / w >= 2.35 && w <= 480) return "fold";
+  return WIDE_MQ && WIDE_MQ.matches ? "wide" : "phone";
+};
+const isWide = () => uiMode() === "wide";
+const isFlip = () => uiMode() === "flip";
+const isFold = () => uiMode() === "fold";
+/** 화면 종류를 :root 클래스에 반영. 바뀌었으면 true */
+function applyMode() {
+  const m = uiMode(), r = document.documentElement, was = r.dataset.layout;
+  r.dataset.layout = m;
+  for (const c of ["wide", "fold", "flip"]) r.classList.toggle(c === "wide" ? "wide" : "ui-" + c, m === c);
+  return was !== m;
+}
+applyMode();
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const ICON = {
   film: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="13" height="14" rx="2.5"/><path d="M16 10l5-3v10l-5-3z"/></svg>',
@@ -807,13 +823,13 @@ const home = {
       requestAnimationFrame(() => this.centerCaption());
     } else if (kind === "live-incl") {
       // 경사형 (2026-11-26 사용자 확정): 게이지를 모두 지우고 직각삼각형 게이지 3개. 세로 화면은 위아래로, 가로 화면은 옆으로 나란히
-      const wide = isWide();
+      const wide = isWide(), flip = isFlip();
       // 2026-11-26: 경사형 게이지는 예전보다 1.3배 (화면에 다 들어가는 만큼까지)
       //  세로: 제목을 게이지 오른쪽 위 빈자리에 얹어 세로 공간을 아낀다 / 가로: 왼쪽 숫자를 앞 게이지의 빗변 옆 빈자리에 겹쳐 놓는다
       const old = wide ? clamp(Math.min(innerHeight - 300, (innerWidth - 220) / 3.9), 130, 300) : clamp((innerHeight - 60 - 70 - 110 - 3 * 76) / 3, 96, 170);
       const fit = wide ? Math.min((innerWidth - 60) / 3.97, innerHeight - 380) : Math.min((innerHeight - 250 - 3 * 34) / 3, innerWidth - 24 - 112 - 46);
-      const size = Math.round(Math.max(90, Math.min(old * 1.3, fit)));
-      body.innerHTML = `<div class="incl ${wide ? "row" : ""}" style="--d:${size}px"><div class="incl-msg" id="inclMsg"><div class="glass"><h3></h3><p></p><span class="pill"></span></div></div>
+      const size = flip ? Math.round(Math.max(60, Math.min((innerWidth - 56 - 8 - 28 - 8) / 3.97, innerHeight - 200))) : Math.round(Math.max(90, Math.min(old * 1.3, fit)));
+      body.innerHTML = `<div class="incl ${wide || flip ? "row" : ""}" style="--d:${size}px"><div class="incl-msg" id="inclMsg"><div class="glass"><h3></h3><p></p><span class="pill"></span></div></div>
         <div class="tris">${[["acc", "가감속도", "m/s²"], ["lat", "흔들림", "gal"], ["spd", "속력", "m/min"]].map(([k, t, u], i) =>
           `<div class="item fade-in" style="animation-delay:${0.1 + i * 0.1}s"><div class="lbl">${t}</div><div class="g" id="tg-${k}"></div></div>`).join("")}</div></div>`;
       this.tris = {}; this.liveAt = {};
@@ -823,18 +839,26 @@ const home = {
       this.inclMsg();
     } else if (kind === "live-simple") {
       const avail = innerHeight - 60 - 70 - 110 - 3 * 44;
-      // 가로 화면: 세 게이지를 옆으로 나란히, 화면 높이에 맞춰 크게
-      const size = isWide() ? Math.round(clamp(Math.min((innerHeight - 260) * 0.95, (innerWidth - 160) / 3.6), 150, 340)) : Math.round(clamp(avail / 3, 104, 176));
+      // 가로 화면: 세 게이지를 옆으로 나란히, 화면 높이에 맞춰 크게 / 플립 커버: 작은 정사각 화면에 나란히 / 폴더블 커버: 세로로 길어 더 크게
+      const size = isFlip() ? Math.round(clamp(Math.min((innerWidth - 56 - 8 - 28 - 12) / 3, innerHeight - 160), 60, 130))
+        : isWide() ? Math.round(clamp(Math.min((innerHeight - 260) * 0.95, (innerWidth - 160) / 3.6), 150, 340))
+        : Math.round(clamp(avail / 3, 104, isFold() ? Math.min(innerWidth - 70, 250) : 176));
       body.innerHTML = `<div class="triple">${[["acc", "가감속도"], ["lat", "좌우 흔들림"], ["spd", "현재 속력"]].map(([k, t], i) =>
         `<div class="item fade-in" style="animation-delay:${i * 0.1}s"><div class="lbl">${t}</div><div id="tr-${k}"></div></div>`).join("")}</div>`;
       this.trip = {}; this.liveAt = {};
       for (const k of ["acc", "lat", "spd"]) { const s = new Sphere(k, size); $(`#tr-${k}`).appendChild(s.el); s.level(0); this.trip[k] = s; }
     } else {
-      body.innerHTML = `<div class="stat-row fade-in">
+      const stats = `<div class="stat-row fade-in">
           <div class="stat glass"><div class="l">저크</div><div class="v" id="lvJ">0.00<small>m/s³</small></div></div>
           <div class="stat glass"><div class="l">상하 흔들림</div><div class="v" id="lvV">0.0<small>gal</small></div></div>
-          <div class="stat glass"><div class="l">주행 거리</div><div class="v" id="lvD">0.0<small>m</small></div></div></div>
-        <div class="charts">${SERIES.map((s, i) => `<div class="chart-card glass fade-in"${lowSpec.on() ? "" : ` style="animation-delay:${0.1 + i * 0.08}s"`}><div class="h"><b>${s.title}</b><span>${s.unit}</span><em id="lv-${s.key}"></em></div><canvas class="chart" id="lc-${s.key}"></canvas></div>`).join("")}</div>`;
+          <div class="stat glass"><div class="l">주행 거리</div><div class="v" id="lvD">0.0<small>m</small></div></div></div>`;
+      const cc = (s, i) => `<div class="chart-card glass fade-in"${lowSpec.on() ? "" : ` style="animation-delay:${0.1 + i * 0.08}s"`}><div class="h"><b>${s.title}</b><span>${s.unit}</span><em id="lv-${s.key}"></em></div><canvas class="chart" id="lc-${s.key}"></canvas></div>`;
+      if (isFlip()) {
+        // 플립 커버: 지표 한 쪽 + 그래프 한 쪽에 하나씩, 가로로 넘겨 본다
+        const pg = SERIES.map((s, i) => `<section class="fl-pg">${cc(s, i)}</section>`);
+        body.innerHTML = `<div class="fl-strip" id="flStripH"><section class="fl-pg">${stats}</section>${pg.join("")}</div><div class="fl-dots" id="flDotsH">${"<i></i>".repeat(pg.length + 1)}</div>`;
+        flipDots($("#flStripH"), $("#flDotsH"));
+      } else body.innerHTML = `${stats}<div class="charts">${SERIES.map(cc).join("")}</div>`;
       this.liveCharts = SERIES.map(s => new Chart($(`#lc-${s.key}`), { values: [], rate: FS, color: s.color, half: s.half, dec: s.dec, unit: s.unit, window: LIVE_WIN }));
       // 화면 밖 그래프는 그리지 않는다
       if (this.liveIO) this.liveIO.disconnect();
@@ -1246,7 +1270,7 @@ const detail = {
   },
   render() {
     const r = this.rec, A = analysisOf(r), ev = A.m.eval, box = $("#detailIn");
-    charts.clear(box);
+    charts.clear(box); box.classList.remove("fl-full");
     box.innerHTML = `<div class="top" id="dHead"><button class="round-btn pop" id="dBack" aria-label="뒤로">${ICON.back}</button>
         <div class="tt"><h2></h2><div></div></div>
         ${owner.on ? `<button class="round-btn pop" id="dVid" aria-label="영상 만들기" title="영상 만들기 (2560×1190 · 60프레임)">${ICON.film}</button>` : ""}
@@ -1293,7 +1317,7 @@ const detail = {
       { k: "spd", lbl: "속력", u: "m/min", v: m.speedMax.toFixed(1), f: I.speedMax.toFixed(1), lv: along / LEGEND_INC.spd,
         b: { lv: "n", t: br.spd }, p: "" },   // '예요 (참고값)'·경사 변화 안내 뺌
     ];
-    const size = isWide() ? Math.round(clamp(Math.min(innerHeight * 0.36, innerWidth / 5.6), 140, 250)) : Math.round(clamp(innerWidth * 0.33, 110, 140));
+    const size = isFlip() ? Math.round(clamp((innerWidth - 36) / 3.5, 66, 100)) : isWide() ? Math.round(clamp(Math.min(innerHeight * 0.36, innerWidth / 5.6), 140, 250)) : Math.round(clamp(innerWidth * 0.33, 110, 140));
     body.innerHTML = this.inclHead(I) + `<div class="d-rows incl-rows">${rows.map((r, i) => `<div class="d-row fade-in" style="animation-delay:${0.1 + i * 0.1}s">
         <div><div class="lbl">${r.lbl}</div><div class="g" id="ds-${r.k}"></div></div>
         <div class="ev"><b class="lv${r.b.lv}">${esc(r.b.t)}</b>${r.p ? `<p>${esc(r.p)}</p>` : ""}</div></div>`).join("")}</div>`;
@@ -1315,7 +1339,7 @@ const detail = {
         : { k: "lat", lbl: "좌우 흔들림", lv: 0, n1: "—", u: "gal", b: { lv: "n", t: "기록이 없어요." }, p: "" },
       { k: "spd", lbl: "속력", lv: m.speedMax / LEGEND.spd, n1: m.speedMax.toFixed(1), u: "m/min", b: ev.speed, p: "" },
     ];
-    const size = isWide() ? Math.round(clamp(Math.min(innerHeight * 0.4, innerWidth / 5.2), 160, 280)) : Math.round(clamp(innerWidth * 0.36, 120, 160));
+    const size = isFlip() ? Math.round(clamp((innerWidth - 36) / 3.4, 66, 104)) : isWide() ? Math.round(clamp(Math.min(innerHeight * 0.4, innerWidth / 5.2), 160, 280)) : Math.round(clamp(innerWidth * 0.36, 120, 160));
     body.innerHTML = `<div class="d-rows">${rows.map((r, i) => `<div class="d-row fade-in" style="animation-delay:${0.1 + i * 0.1}s">
         <div><div class="lbl">${r.lbl}</div><div id="ds-${r.k}"></div></div>
         <div class="ev"><b class="lv${r.b.lv}">${esc(r.b.t)}</b>${r.p ? `<p>${esc(r.p)}</p>` : ""}</div></div>`).join("")}</div>`;
@@ -1327,7 +1351,7 @@ const detail = {
   },
   /** 자세히: AI 평가 + 9가지 지표 + 그래프 */
   full(A) {
-    const m = A.m, ev = m.eval, body = $("#dBody"), S = A.series, r = this.rec;
+    const m = A.m, ev = m.eval, body = $("#dBody"), box = $("#detailIn"), S = A.series, r = this.rec;
     const floors = Math.round(m.distance / 3);
     const NO = "기록이 없어요.";
     const gal = (v, g, d = 0) => (v == null ? { v: "—", u: "", e: NO, lv: -1 } : { v: v.toFixed(d), u: "gal", e: g.s, lv: g.lv });
@@ -1352,7 +1376,7 @@ const detail = {
         ${c.v2 ? `<div class="v2">${c.v2.map(([k, v]) => `<div><span>${k}</span><b>${v}</b></div>`).join("")}</div><div class="u">${c.u}</div>`
                : `<div class="v">${c.v}<small>${c.u}</small></div>`}
         <div class="e ${c.e2 ? "two" : ""} ${c.lv >= 0 ? "lv" + c.lv : ""}">${c.e2 ? c.e2.map(x => `<span>${esc(x)}</span>`).join("") : esc(c.e)}</div></div>`;
-    let inclHtml = "";
+    let inclHtml = "", inclCards = [];
     if (I) {
       // 경사형 지표 (2026-11-26 사용자 확정): 경사도, 앞뒤 가감속도·속력·흔들림, 수직·앞뒤 이동거리
       const sn = Math.sin(I.theta * Math.PI / 180), along = I.speedAlong != null ? I.speedAlong : m.speedMax / sn;
@@ -1365,8 +1389,17 @@ const detail = {
         { l: "수직 이동거리", v: I.distV.toFixed(1), u: "m", e: floors >= 1 ? `건물 약 ${floors}층 높이` : "거의 움직이지 않았어요", lv: -1 },
         { l: "앞뒤 이동거리", v: I.distF.toFixed(1), u: "m", e: `경사 방향 ${I.distAlong.toFixed(1)} m`, lv: -1 },
       ];
+      inclCards = ic;
       inclHtml = this.inclHead(I) + `<div class="m6">${ic.map(card).join("")}</div><div class="incl-sec fade-in"><span class="tag">기본 지표</span><span class="s">수직 방향</span></div>`;
     }
+    if (isFlip()) {
+      // 플립 커버: 지표 카드는 한 쪽에 네 장(2×2), 그래프는 한 쪽에 하나씩. 가로로 넘겨 보고 맨 끝에서 한 번 더 왼쪽으로 쓸면 간단히
+      const all = inclCards.concat(cards), pg = [];
+      for (let i = 0; i < all.length; i += 4) pg.push(`<section class="fl-pg"><div class="m4">${all.slice(i, i + 4).map((c, k) => card(c, i + k)).join("")}</div></section>`);
+      series.forEach(s => pg.push(`<section class="fl-pg"><div class="chart-card glass"><div class="h"><b>${s.title}</b><span>${s.unit}</span><em>${esc(comment[s.key] || "")}</em></div><canvas class="chart" id="dc-${s.key}"></canvas></div></section>`));
+      body.innerHTML = `<div class="fl-strip" id="flStrip">${pg.join("")}</div><div class="fl-dots" id="flDots">${"<i></i>".repeat(pg.length)}</div>`;
+      box.classList.add("fl-full"); flipDots($("#flStrip"), $("#flDots"));
+    } else
     body.innerHTML = `${inclHtml}<div class="m6">${cards.map((c, i) => card(c, i + (I ? 6 : 0))).join("")}</div>
       <div class="charts">${series.map((s, i) => `<div class="chart-card glass fade-in" style="animation-delay:${0.1 + i * 0.08}s">
         <div class="h"><b>${s.title}</b><span>${s.unit}</span><em>${esc(comment[s.key] || "")}</em></div>
@@ -1501,6 +1534,45 @@ function vswipe(el, onToggle, canStart = () => true, isDetail = () => false) {
   }, { passive: true });
   el.addEventListener("touchcancel", () => { on = false; }, { passive: true });
 }
+/** 플립 커버: 위아래로 쓸어 쪽 이동. 쪽 안에서 스크롤하다 끝에 닿은 방향으로만 넘어간다 */
+function vpager(el, onGo, canStart, getPage) {
+  let sx = 0, sy = 0, t0 = 0, on = false, top = false, bot = false;
+  el.addEventListener("touchstart", e => {
+    if (e.touches.length !== 1 || !canStart(e)) { on = false; return; }
+    const t = e.touches[0], p = getPage(); sx = t.clientX; sy = t.clientY; t0 = performance.now(); on = true;
+    top = !p || p.scrollTop <= 2; bot = !p || p.scrollTop + p.clientHeight >= p.scrollHeight - 2;
+  }, { passive: true });
+  el.addEventListener("touchend", e => {
+    if (!on) return; on = false;
+    const t = e.changedTouches[0], dx = t.clientX - sx, dy = t.clientY - sy;
+    if (performance.now() - t0 > 800 || Math.abs(dy) < 50 || Math.abs(dy) < Math.abs(dx) * 1.4) return;
+    if (dy < 0 && bot) onGo(1); else if (dy > 0 && top) onGo(-1);
+  }, { passive: true });
+  el.addEventListener("touchcancel", () => { on = false; }, { passive: true });
+}
+/** 플립 커버: 왼쪽으로 쓸기. strip이 없으면(간단히) onEnter, 있으면(자세히) 맨 끝에서 왼쪽·맨 처음에서 오른쪽일 때 onExit */
+function hswipe(el, getStrip, onEnter, onExit, canStart) {
+  let sx = 0, sy = 0, t0 = 0, on = false, strip = null, atStart = false, atEnd = false;
+  el.addEventListener("touchstart", e => {
+    if (e.touches.length !== 1 || !canStart(e)) { on = false; return; }
+    const t = e.touches[0]; sx = t.clientX; sy = t.clientY; t0 = performance.now(); on = true;
+    strip = getStrip();
+    if (strip) { atStart = strip.scrollLeft <= 2; atEnd = strip.scrollLeft + strip.clientWidth >= strip.scrollWidth - 2; }
+  }, { passive: true });
+  el.addEventListener("touchend", e => {
+    if (!on) return; on = false;
+    const t = e.changedTouches[0], dx = t.clientX - sx, dy = t.clientY - sy;
+    if (performance.now() - t0 > 800 || Math.abs(dx) < 50 || Math.abs(dx) < Math.abs(dy) * 1.4) return;
+    if (!strip) { if (dx < 0) onEnter(); return; }
+    if ((dx < 0 && atEnd) || (dx > 0 && atStart)) onExit();
+  }, { passive: true });
+  el.addEventListener("touchcancel", () => { on = false; }, { passive: true });
+}
+/** 자세히 가로 쪽: 지금 쪽에 맞춰 점 표시 */
+function flipDots(strip, dots) {
+  const set = () => { const i = Math.round(strip.scrollLeft / Math.max(1, strip.clientWidth)); dots.querySelectorAll("i").forEach((d, k) => d.classList.toggle("on", k === i)); };
+  strip.addEventListener("scroll", set, { passive: true }); set();
+}
 function swipe(el, onCommit, onMove, onCancel, canStart = () => true) {
   let sx = 0, sy = 0, dx = 0, active = false, dragging = false, id = null, t0 = 0;
   el.addEventListener("pointerdown", e => {
@@ -1542,17 +1614,27 @@ const nav = {
     swipe(pager, dir => this.go(clamp(this.page + dir, 0, 2)),
       dx => { const W = pager.parentElement.clientWidth; const edge = (this.page === 0 && dx > 0) || (this.page === 2 && dx < 0); pager.style.transform = `translateX(${-this.page * W + (edge ? dx * 0.3 : dx)}px)`; },
       () => this.go(this.page),
-      e => !this.overlay && !records.selecting && !records.searching && !e.target.closest("input, .seg, .switch"));
+      e => !isFlip() && !this.overlay && !records.selecting && !records.searching && !e.target.closest("input, .seg, .switch"));
+    // 플립 커버: 위아래로 쓸어 기록 관리 · 측정 · 설정 사이를 이동 (쪽 안의 스크롤이 끝에 닿았을 때)
+    vpager($(".pager-wrap"), dir => this.go(clamp(this.page + dir, 0, 2)),
+      e => isFlip() && !this.overlay && !records.selecting && !records.searching && !e.target.closest("input, .seg, .switch, .hold"),
+      () => $(["#pRecords", "#pHome", "#pSettings"][this.page]));
     $("#navRecords").onclick = () => this.go(0);
     $("#navHome").onclick = () => this.go(1);
     $("#navSettings").onclick = () => this.go(2);
     $("#btnHelp").onclick = () => help.open();
     // 홈(측정): 아래에서 위로 쓸면 간단히 ↔ 자세히
-    const okHome = e => this.page === 1 && !this.overlay && !e.target.closest("input, .seg, .switch, .hold");
+    const okHome = e => !isFlip() && this.page === 1 && !this.overlay && !e.target.closest("input, .seg, .switch, .hold");
     vswipe($("#pHome"), () => { home.detail = !home.detail; home.render(); }, okHome, () => home.detail);
     // 기록 보기: 같은 방식 (자세히는 뒤로 가기 기록과 함께)
     vswipe($("#detailIn"), () => { if (!detail.rec) return; if (detail.detail) nav.back(); else { detail.setDetail(true); nav.push("recordfull"); } },
-      e => !e.target.closest("input, button"), () => detail.detail);
+      e => !isFlip() && !e.target.closest("input, button"), () => detail.detail);
+    // 플립 커버: 왼쪽으로 쓸면 자세히, 자세히의 맨 끝에서 다시 왼쪽(또는 처음에서 오른쪽)으로 쓸면 간단히
+    hswipe($("#pHome"), () => $("#flStripH"), () => { if (ctl.state === "measure" && !home.detail) { home.detail = true; home.render(); } },
+      () => { home.detail = false; home.render(); },
+      e => isFlip() && this.page === 1 && !this.overlay && !e.target.closest("input, .hold"));
+    hswipe($("#detailIn"), () => $("#flStrip"), () => { if (detail.rec && !detail.detail) { detail.setDetail(true); nav.push("recordfull"); } },
+      () => nav.back(), e => isFlip() && !e.target.closest("input"));
     if (location.hash) history.replaceState(null, "", location.pathname + location.search);   // 항상 홈에서 시작
     window.addEventListener("hashchange", () => this.onHash());
     window.addEventListener("resize", () => this.place());
@@ -1604,9 +1686,9 @@ const nav = {
   moveOrb() {
     const orb = $("#navOrb"), b = $(["#navRecords", "#navHome", "#navSettings"][this.page]);
     if (!orb || !b) return;
-    orb.style.transform = `translateX(${b.offsetLeft + b.offsetWidth / 2 - orb.offsetWidth / 2}px)`;
+    orb.style.transform = isFlip() ? `translateY(${b.offsetTop + b.offsetHeight / 2 - orb.offsetHeight / 2}px)` : `translateX(${b.offsetLeft + b.offsetWidth / 2 - orb.offsetWidth / 2}px)`;
   },
-  place() { $("#pager").style.transform = `translateX(${-this.page * 33.3334}%)`; },
+  place() { $("#pager").style.transform = isFlip() ? `translateY(${-this.page * 33.3334}%)` : `translateX(${-this.page * 33.3334}%)`; },
   showPage(i) {
     const changed = i !== this.page;
     this.page = i; this.place();
@@ -1656,9 +1738,8 @@ const heal = {
     setInterval(() => { if (!document.hidden) this.run(false); }, 60000);
   },
   run(force) {
-    const wide = isWide(), flip = wide !== document.documentElement.classList.contains("wide");
+    const flip = applyMode();
     if (flip) {
-      document.documentElement.classList.toggle("wide", wide);
       home.layout = ""; home.render();                                   // 측정 중이어도 배치를 다시 (실시간 값은 다음 틱에 다시 채워짐)
       if (nav.overlay === "record" && detail.rec) detail.render();
     }
