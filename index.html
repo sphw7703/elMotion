@@ -428,7 +428,7 @@ canvas.chart { display: block; width: 100%; height: 150px; touch-action: pan-y; 
 .switch { flex: none; width: 52px; height: 32px; border-radius: 999px; background: var(--surface-2); position: relative; transition: background .25s; }
 .switch i { position: absolute; top: 3px; left: 3px; width: 26px; height: 26px; border-radius: 50%; background: #fff; box-shadow: 0 1px 3px rgba(19,26,43,.2); transition: transform .25s cubic-bezier(.3,1.2,.5,1); }
 .switch[aria-checked="true"] { background: var(--accent); }
-.switch[aria-checked="true"] i { transform: translateX(20px); }
+.switch[aria-checked="true"] i { transform: translateX(20px); background: var(--on-accent); }
 .switch:disabled { opacity: .45; }
 
 @media (prefers-reduced-motion: reduce) {
@@ -469,8 +469,8 @@ body { background: var(--page-bg); background-attachment: fixed; }
 .ai-chip { background: var(--navy-grad); color: var(--on-accent); box-shadow: 0 6px 16px -6px rgba(27,42,99,.6); }
 :root[data-ui="dark"] .ai-chip { box-shadow: 0 0 18px -4px rgba(91,140,255,.7); }
 .m6-card, .chart-card, .rec-card, .ai-box { border-radius: 22px; }
-/* 성능 (2026-11-27): 기록 상세의 카드·그래프 상자 20여 개에 뒷배경 흐림(backdrop-filter)을 쓰면 스크롤·등장 때 프레임이 크게 떨어진다 → 흐림만 빼고 모양은 같게 */
-.m6-card.glass, .chart-card.glass { -webkit-backdrop-filter: none; backdrop-filter: none; }
+/* 저사양 모드 (2026-11-27): 기록 상세의 카드·그래프 상자 20여 개에 뒷배경 흐림(backdrop-filter)을 쓰면 스크롤·등장 때 프레임이 크게 떨어진다 → 흐림만 빼고 모양은 같게 */
+:root.lowspec .m6-card.glass, :root.lowspec .chart-card.glass { -webkit-backdrop-filter: none; backdrop-filter: none; }
 /* AI 평가 (2026-11-25 사용자 확정): 레퍼런스(빛나는 유리 구슬)의 색과 질감
    · 칩(타원): 유리 안에서 번진 색 덩어리가 천천히 소용돌이치고, 윗면 광택 + 가는 빛 테두리 + 바깥으로 번지는 빛
    · 상자: 가는 무지개 테두리가 빙글 돌고, 그 테두리가 안팎으로 은은하게 번진다. 유리 안쪽 구석에 옅은 색이 비친다
@@ -712,6 +712,12 @@ body.selecting #recList { padding-bottom: 150px; }
           <div class="set-row">
             <div class="t"><h3 style="margin:0">데모 측정</h3><p>센서 대신 미리 만든 신호로 측정해 봐요</p></div>
             <div class="demo-btns" id="demoBtns"><button class="pill-btn" data-demo="std">일반</button><button class="pill-btn" data-demo="incl">경사형</button></div>
+          </div>
+        </div>
+        <div class="set-card glass">
+          <div class="set-row">
+            <div class="t"><h3 style="margin:0">저사양 모드</h3><p>기록 상세의 효과를 줄여 끊김을 막아요</p></div>
+            <button class="switch" id="lowSw" role="switch" aria-checked="false" aria-label="저사양 모드"><i></i></button>
           </div>
         </div>
         <div class="set-card glass" id="syncCard">

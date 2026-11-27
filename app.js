@@ -48,6 +48,13 @@ const prefs = {
   set(k, v) { try { localStorage.setItem("elmotion." + k, v); } catch (e) { /* 저장 불가 환경 */ } },
 };
 
+/** 저사양 모드 (2026-11-27): 기록 상세의 효과를 줄여 프레임 드랍을 막는다. 설정에서 켜고 끈다 (기본 꺼짐) */
+const lowSpec = {
+  on() { return prefs.get("lowspec", "0") === "1"; },
+  apply() { document.documentElement.classList.toggle("lowspec", this.on()); },
+};
+lowSpec.apply();
+
 function toast(msg, ms = 3200) {
   const t = $("#toast"); t.textContent = msg; t.classList.add("show");
   clearTimeout(toast.h); toast.h = setTimeout(() => t.classList.remove("show"), ms);
@@ -824,7 +831,7 @@ const home = {
           <div class="stat glass"><div class="l">저크</div><div class="v" id="lvJ">0.00<small>m/s³</small></div></div>
           <div class="stat glass"><div class="l">상하 흔들림</div><div class="v" id="lvV">0.0<small>gal</small></div></div>
           <div class="stat glass"><div class="l">주행 거리</div><div class="v" id="lvD">0.0<small>m</small></div></div></div>
-        <div class="charts">${SERIES.map((s, i) => `<div class="chart-card glass fade-in"><div class="h"><b>${s.title}</b><span>${s.unit}</span><em id="lv-${s.key}"></em></div><canvas class="chart" id="lc-${s.key}"></canvas></div>`).join("")}</div>`;
+        <div class="charts">${SERIES.map((s, i) => `<div class="chart-card glass fade-in"${LOW ? "" : ` style="animation-delay:${0.1 + i * 0.08}s"`}><div class="h"><b>${s.title}</b><span>${s.unit}</span><em id="lv-${s.key}"></em></div><canvas class="chart" id="lc-${s.key}"></canvas></div>`).join("")}</div>`;
       this.liveCharts = SERIES.map(s => new Chart($(`#lc-${s.key}`), { values: [], rate: FS, color: s.color, half: s.half, dec: s.dec, unit: s.unit, window: LIVE_WIN }));
       // 화면 밖 그래프는 그리지 않는다
       if (this.liveIO) this.liveIO.disconnect();
@@ -1336,7 +1343,8 @@ const detail = {
     const series = SERIES.filter(s => s.key !== "vibL" || m.vibL).concat(I ? SERIES_INC : []);
     const comment = { acc: ev.acc.s, jerk: ev.jerk.s, vibV: ev.vibV.s, vibL: ev.vibL ? ev.vibL.s : "", speed: ev.speed.s,
       fa: I ? (ev.fa.a === ev.fa.d ? ev.fa.a : `${ev.fa.a}·${ev.fa.d}`) : "", vibF: ev.vibF ? ev.vibF.s : "", speedF: I && I.changes.length ? "경사 변화 있음" : "" };
-    const card = (c, i) => `<div class="m6-card glass fade-in">
+    const LOW = lowSpec.on();
+    const card = (c, i) => `<div class="m6-card glass fade-in"${LOW ? "" : ` style="animation-delay:${0.05 + i * 0.04}s"`}>
         <div class="l">${c.l}</div>
         ${c.v2 ? `<div class="v2">${c.v2.map(([k, v]) => `<div><span>${k}</span><b>${v}</b></div>`).join("")}</div><div class="u">${c.u}</div>`
                : `<div class="v">${c.v}<small>${c.u}</small></div>`}
@@ -1360,7 +1368,7 @@ const detail = {
       <div class="charts">${series.map((s, i) => `<div class="chart-card glass fade-in" style="animation-delay:${0.1 + i * 0.08}s">
         <div class="h"><b>${s.title}</b><span>${s.unit}</span><em>${esc(comment[s.key] || "")}</em></div>
         <canvas class="chart" id="dc-${s.key}" style="height:180px"></canvas></div>`).join("")}</div>`;
-    series.forEach(s => new Chart($(`#dc-${s.key}`), { values: S[s.key], rate: r.rate, color: s.color, half: s.half, dec: s.dec, unit: s.unit, animate: !I, lazy: true, tap: true, marks: s.key === "speed" || s.key === "speedF" ? "peak" : true, spans: (s.key === "vibV" || s.key === "vibL" || s.key === "vibF") && A.m.cruise.length ? A.m.cruise : null, pauses: A.m.pauses }));
+    series.forEach(s => new Chart($(`#dc-${s.key}`), { values: S[s.key], rate: r.rate, color: s.color, half: s.half, dec: s.dec, unit: s.unit, animate: !(LOW && I), lazy: LOW, tap: true, marks: s.key === "speed" || s.key === "speedF" ? "peak" : true, spans: (s.key === "vibV" || s.key === "vibL" || s.key === "vibF") && A.m.cruise.length ? A.m.cruise : null, pauses: A.m.pauses }));
   },
 };
 
@@ -1377,6 +1385,11 @@ const settings = {
       <p>측정 기록은 이 기기의 브라우저 저장소에 보관돼요. 브라우저 데이터를 지우면 함께 지워져요.</p>
       <p>측정값은 휴대폰 센서로 구한 참고값이에요. 공식 승차감 검사를 대신하지 않아요.</p>
       <div class="acts"><button class="solid" id="dOk">확인</button></div>`, (b, close) => { b.querySelector("#dOk").onclick = close; });
+    const sw = $("#lowSw");
+    if (sw) {
+      const show = () => sw.setAttribute("aria-checked", lowSpec.on() ? "true" : "false");
+      show(); sw.onclick = () => { prefs.set("lowspec", lowSpec.on() ? "0" : "1"); lowSpec.apply(); show(); toast(lowSpec.on() ? "저사양 모드를 켰어요. 기록 상세부터 적용돼요." : "저사양 모드를 껐어요."); };
+    }
     this.renderMode();
     // 데모 측정: 홈으로 가서 데모 신호로 측정 (일반 / 경사형)
     document.querySelectorAll("#demoBtns button").forEach(b => b.onclick = () => {
