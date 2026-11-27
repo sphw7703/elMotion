@@ -4,9 +4,9 @@
 /* ───────── 상수 ───────── */
 const FS = Core.FS;
 /* 앱 버전 (2026-11-25 사용자 확정): 0.큰 기능 묶음.고친 횟수 — 웹 앱 확정 때 1.0.0, 안드로이드 앱 때 2.0.0 */
-const APP_VERSION = "0.13.24";
-const LEGEND = { acc: 1.5, lat: 30, latA: 20, spd: 600 };
-const LEGEND_INC = { acc: 1.0, lat: 80, spd: 90 };   // 경사형 게이지 범례 (2026-11-26 사용자 확정): 가감속 1.0 m/s², 흔들림 80 gal, 속력 90 m/min   // 물 높이 범례 (화면에 표시하지 않음). lat: 실시간 p-p, latA: 기록의 |98% 피크|
+const APP_VERSION = "0.14.1";
+const LEGEND = { acc: 1.5, lat: 30, latA: 20, spd: 600, cube: 30 };   // cube: 흔들림 큐브 물 높이 (가중 p-p, 25 gal 넘으면 매우 나쁨)
+const LEGEND_INC = { acc: 1.0, lat: 80, spd: 90, cube: 60 };   // 경사형 게이지 범례 (2026-11-26 사용자 확정): 가감속 1.0 m/s², 흔들림 80 gal, 속력 90 m/min   // 물 높이 범례 (화면에 표시하지 않음). lat: 실시간 p-p, latA: 기록의 |98% 피크|
 const CUT = Math.round(Core.P.CUT_SEC * FS);
 const CUT_MANUAL = Math.round(0.3 * FS);   // 수동 모드 종료 시 버려지는 마지막 0.3초
 const HOLD_MS = 300;                       // 측정 재개: 이만큼 길게 눌러야 한다
@@ -232,6 +232,74 @@ class TriGauge {
     if (along != null && this.sb) this.sb.textContent = along; return this;
   }
 }
+
+/* ───────── 흔들림 큐브 게이지 (2026-11-27 사용자 확정)
+   유리 큐브 사진(라이트·다크) 안에 코랄색 물이 큐브 모양대로 찬다. 물 높이 = 세 축 중 가장 큰 값 / 범례.
+   윗면 = 상하, 왼쪽 면 = 앞뒤, 오른쪽 면 = 좌우 (각 면 한가운데, 면 기울기에 맞춰 눕힌 흰 글자). 기록 목록 미리보기는 제외 */
+const CUBE = {
+  // 사진(2048px)을 200 단위로 줄인 꼭짓점: 윗면 T·L·F·R, 아랫면 LB·B·RB, 보이지 않는 뒤쪽 아래 BK
+  P: { T: [99.6, 9.9], L: [14.8, 45.9], F: [100.1, 70.8], R: [185, 46.9], LB: [14.8, 144.5], B: [99.6, 189.8], RB: [185, 145], BK: [99.1, 128.9] },
+  OUT: "99.6,9.9 185,46.9 185,145 99.6,189.8 14.8,144.5 14.8,45.9",   // 큐브 윤곽 (반사광을 안쪽으로 자름)
+  lerp: (a, b, t) => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t],
+  pts: a => a.map(p => p[0].toFixed(1) + "," + p[1].toFixed(1)).join(" "),
+  /** 물 모양: [몸통(앞 두 면 + 수면 뒤쪽), 수면] */
+  water(h) {
+    const P = this.P, C = [99.8, 99.8], q = p => [C[0] + (p[0] - C[0]) * .9, C[1] + (p[1] - C[1]) * .9];
+    const LB = q(P.LB), B = q(P.B), RB = q(P.RB), BK = q(P.BK), wL = this.lerp(LB, q(P.L), h), wF = this.lerp(B, q(P.F), h), wR = this.lerp(RB, q(P.R), h), wT = this.lerp(BK, q(P.T), h);
+    return [this.pts([LB, B, RB, wR, wT, wL]), this.pts([wL, wF, wR, wT])];
+  },
+};
+let CUB = 0;
+class CubeGauge {
+  static svg(id, h, vals) {
+    const [body, top] = CUBE.water(h), v = vals || {};
+    const face = (c, sy, lab, key, unit) => `<g transform="matrix(${sy == null ? "1,0,0,.62" : `0.922,${sy},0,1`},${c[0]},${c[1]})"><text class="cl" x="0" y="-18" text-anchor="middle">${lab}</text><text class="cv" x="0" y="10" text-anchor="middle"><tspan data-k="${key}">${esc(v[key] || "—")}</tspan>${unit ? `<tspan class="cu"> gal</tspan>` : ""}</text></g>`;
+    const img = c => `<image class="${c}" href="assets/glass-cube${c.includes("cb-d") ? "-dark" : ""}.webp" x="0" y="0" width="200" height="200"/>`;
+    return `<svg viewBox="10 6 180 188" class="cube-svg" aria-hidden="true"><defs>
+      <linearGradient id="cw${id}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" style="stop-color:var(--wl)"/><stop offset=".6" style="stop-color:var(--wm)"/><stop offset="1" style="stop-color:var(--wd)"/></linearGradient>
+      <clipPath id="cc${id}"><polygon points="${CUBE.OUT}"/></clipPath>
+      <radialGradient id="ch${id}" gradientUnits="userSpaceOnUse" cx="38" cy="48" r="78"><stop offset="0" stop-color="#fff" stop-opacity=".62"/><stop offset=".5" stop-color="#fff" stop-opacity=".16"/><stop offset="1" stop-color="#fff" stop-opacity="0"/></radialGradient></defs>
+      ${img("cb-l")}${img("cb-d")}
+      <polygon class="cw-b" points="${body}" fill="url(#cw${id})"/><polygon class="cw-t" points="${top}"/>
+      ${img("cb-l cb-top")}${img("cb-d cb-top")}
+      <g class="cb-hl" clip-path="url(#cc${id})"><rect x="0" y="0" width="200" height="200" fill="url(#ch${id})"/>
+</g>
+      <g class="cube-txt">${face([99.8, 40.3], null, "상하", "ud", true)}${face([57.3, 112.8], .388, "앞뒤", "fb")}${face([142.4, 113.1], -.388, "좌우", "lr")}</g></svg>`;
+  }
+  constructor(size) {
+    this.el = document.createElement("div"); this.el.className = "cube"; this.el.style.cssText = `--d:${size}px`;
+    this.el.innerHTML = CubeGauge.svg(++CUB, 0);
+    this.b = this.el.querySelector(".cw-b"); this.t = this.el.querySelector(".cw-t");
+    this.tx = {}; this.el.querySelectorAll("tspan[data-k]").forEach(e => { this.tx[e.dataset.k] = e; });
+    this.h = 0; this.target = 0; this.raf = 0; this.dur = 900;
+    this.draw(0);
+  }
+  draw(h) { const [b, t] = CUBE.water(h); this.b.setAttribute("points", b); this.t.setAttribute("points", t); }
+  /** 0~1: 바닥에서 윗면까지. 원형 게이지처럼 부드럽게 오르내린다 */
+  level(v) {
+    v = clamp(v, 0, 1); const shown = v <= 0 ? 0 : Math.max(v, 0.045);
+    if (Math.abs(shown - this.target) < 0.002) return this;
+    this.target = shown; cancelAnimationFrame(this.raf);
+    if (lowSpec.none()) { this.h = shown; this.draw(shown); return this; }
+    const from = this.h, t0 = performance.now(), D = this.el.classList.contains("quick") ? 350 : this.dur;
+    const step = now => { const k = clamp((now - t0) / D, 0, 1), e = 1 - Math.pow(1 - k, 3); this.h = from + (shown - from) * e; this.draw(this.h); if (k < 1) this.raf = requestAnimationFrame(step); };
+    this.raf = requestAnimationFrame(step); return this;
+  }
+  /** 상하 · 앞뒤 · 좌우 (gal 숫자 글자) */
+  vals(ud, fb, lr) {
+    for (const [k, x] of [["ud", ud], ["fb", fb], ["lr", lr]]) if (x != null && this.tx[k].textContent !== x) this.tx[k].textContent = x;
+    return this;
+  }
+  quick(on) { this.el.classList.toggle("quick", on); return this; }
+}
+/** 흔들림 기록값 → 큐브 글자 */
+const ppTxt = t => (t && t.n ? t.pp95.toFixed(1) : "—");
+/** 세 축 중 가장 큰 흔들림 (경사형의 앞뒤는 경사 방향) */
+const vibMax = m => Math.max(...[m.vibV, m.incl ? m.incl.vibF : m.vibF, m.vibL].map(t => (t && t.n ? t.pp95 : 0)));
+/** 세 축 중 가장 나쁜 등급 */
+const worstVib = ev => { const w = [ev.vibV, ev.vibF, ev.vibL].filter(x => x && x.lv >= 0).sort((a, b) => b.lv - a.lv)[0]; return w ? { lv: w.lv, t: w.s } : { lv: "n", t: "기록이 없어요." }; };
+/** '가속은 부드럽고 감속도 부드러워요' → '~고' 뒤에서 줄바꿈 (2026-11-27 사용자 요청) */
+const brk = t => String(t).replace(/고 /, "고\n");
 
 /** 기록 목록용 작은 삼각형 게이지: 물 높이는 고정 (2026-11-26) */
 function triMini(kind, v, inner) {
@@ -462,7 +530,7 @@ const cache = new Map();
 /** 경사형: 글 한 문장을 무조건 한 줄로 — 칸에 안 들어가면 글자를 줄인다 */
 function fitLines(root) {
   root.querySelectorAll(".incl-rows .ev b, .incl-rows .ev p").forEach(el => {
-    el.style.whiteSpace = el.tagName === "P" ? "pre" : "nowrap"; el.style.fontSize = "";
+    el.style.whiteSpace = "pre"; el.style.fontSize = "";   // b도 pre: "~고" 줄바꿈 유지 (2026-11-27)
     const box = el.parentElement, base = parseFloat(getComputedStyle(el).fontSize);
     let f = base; while (el.scrollWidth > box.clientWidth + 0.5 && f > base * 0.5) { f -= 0.5; el.style.fontSize = f + "px"; }
   });
@@ -671,7 +739,7 @@ const ctl = {
     if (this.abn) { const why = this.abn.push(x, y, z); if (why) return this.stop("abnormal"); }
     const [v, l, h] = this.cal.project(x, y, z);
     this.vert.push(v); this.lat.push(l); this.lon.push(h);
-    const o = this.an.push(v, l);
+    const o = this.an.push(v, l, h);   // h: 앞뒤 (흔들림 큐브, 2026-11-27)
     // 경사형 엘리베이터: 가감속마다 3축 방향을 보고 감지·경사각 변화 판단, 감지 뒤에는 앞뒤 축을 따로 잰다
     const ev = this.idet.push(v, l, h, this.an.v);
     if (ev) this.onIncl(ev);
@@ -834,8 +902,8 @@ const home = {
           `<div class="item fade-in" style="animation-delay:${0.1 + i * 0.1}s"><div class="lbl">${t}</div><div class="g" id="tg-${k}"></div></div>`).join("")}</div></div>`;
       this.tris = {}; this.liveAt = {};
       const U = { acc: "m/s²", lat: "gal", spd: "m/min" };
-      for (const k of ["acc", "lat", "spd"]) { const g = new TriGauge(k, size, U[k]); $(`#tg-${k}`).appendChild(g.el); g.vals("0.00", "0.00").level(0); this.tris[k] = g; }
-      this.tris.lat.vals("0.0", "0.0"); this.tris.spd.vals("0.0", "0.0", "0.0");
+      for (const k of ["acc", "lat", "spd"]) { const g = k === "lat" ? new CubeGauge(size) : new TriGauge(k, size, U[k]); $(`#tg-${k}`).appendChild(g.el); g.vals("0.00", "0.00").level(0); this.tris[k] = g; }
+      this.tris.lat.vals("0.0", "0.0", "0.0"); this.tris.spd.vals("0.0", "0.0", "0.0");
       this.inclMsg();
     } else if (kind === "live-simple") {
       const avail = innerHeight - 60 - 70 - 110 - 3 * 44;
@@ -843,10 +911,10 @@ const home = {
       const size = isFlip() ? Math.round(clamp(Math.min((innerWidth - 56 - 8 - 28 - 12) / 3, innerHeight - 160), 60, 130))
         : isWide() ? Math.round(clamp(Math.min((innerHeight - 260) * 0.95, (innerWidth - 160) / 3.6), 150, 340))
         : Math.round(clamp(avail / 3, 104, isFold() ? Math.min(innerWidth - 70, 250) : 176));
-      body.innerHTML = `<div class="triple">${[["acc", "가감속도"], ["lat", "좌우 흔들림"], ["spd", "현재 속력"]].map(([k, t], i) =>
+      body.innerHTML = `<div class="triple">${[["acc", "가감속도"], ["lat", "흔들림"], ["spd", "현재 속력"]].map(([k, t], i) =>
         `<div class="item fade-in" style="animation-delay:${i * 0.1}s"><div class="lbl">${t}</div><div id="tr-${k}"></div></div>`).join("")}</div>`;
       this.trip = {}; this.liveAt = {};
-      for (const k of ["acc", "lat", "spd"]) { const s = new Sphere(k, size); $(`#tr-${k}`).appendChild(s.el); s.level(0); this.trip[k] = s; }
+      for (const k of ["acc", "lat", "spd"]) { const s = k === "lat" ? new CubeGauge(size).vals("0.0", "—", "0.0") : new Sphere(k, size); $(`#tr-${k}`).appendChild(s.el); s.level(0); this.trip[k] = s; }
     } else {
       const stats = `<div class="stat-row fade-in">
           <div class="stat glass"><div class="l">저크</div><div class="v" id="lvJ">0.00<small>m/s³</small></div></div>
@@ -971,11 +1039,11 @@ const home = {
       // 경사형: 왼쪽 변 = 수직, 아래 변 = 앞뒤 (흔들림만: 왼쪽 = 앞뒤, 아래 = 좌우). 물 높이 = 경사 방향(합친) 값 / 범례 (가감속 0.6 m/s², 흔들림 20 gal, 속력 90 m/min)
       const I = ctl.incl, rad = I.theta * Math.PI / 180, cot = 1 / Math.tan(rad), sn = Math.sin(rad), f = ctl.of, T = this.tris;
       if (due("acc")) { const av = Math.abs(o.acc), af = f ? Math.abs(f.acc) : av * cot; T.acc.vals(av.toFixed(2), af.toFixed(2)).level(Math.hypot(av, af) / LEGEND_INC.acc); }
-      if (due("lat")) { const pf = f ? f.pp : 0, pl = ctl.ol ? ctl.ol.pp : 0; T.lat.vals(f ? pf.toFixed(1) : "—", ctl.ol ? pl.toFixed(1) : "—").level(Math.max(pf, pl) / LEGEND_INC.lat); }
+      if (due("lat")) { const pf = f ? f.pp : 0, pl = ctl.ol ? ctl.ol.pp : 0; T.lat.vals(o.ppV.toFixed(1), f ? pf.toFixed(1) : "—", ctl.ol ? pl.toFixed(1) : "—").level(Math.max(o.ppV, pf, pl) / LEGEND_INC.cube); }   // 큐브: 상하·앞뒤·좌우
       if (due("spd")) { const sv = Math.abs(o.speed); T.spd.vals(sv.toFixed(1), (sv * cot).toFixed(1), (sv / sn).toFixed(1)).level(sv / sn / LEGEND_INC.spd); }
     } else if (this.trip) {
       if (due("acc")) this.trip.acc.level(Math.abs(o.acc) / LEGEND.acc).text(Math.abs(o.acc).toFixed(2), null, "m/s²");
-      if (due("lat")) this.trip.lat.level(o.ppL / LEGEND.lat).text(o.ppL.toFixed(1), null, "gal");
+      if (due("lat")) { const n = x => (Number.isNaN(x) ? "—" : x.toFixed(1)); this.trip.lat.vals(n(o.ppV), n(o.ppF), n(o.ppL)).level(Math.max(o.ppV, o.ppF || 0, o.ppL || 0) / LEGEND.cube); }   // 큐브: 상하·앞뒤·좌우 (2026-11-27)
       if (due("spd")) this.trip.spd.level(Math.abs(o.speed) / LEGEND.spd).text(Math.abs(o.speed).toFixed(1), null, "m/min");
     } else if (this.liveCharts.length) {
       $("#lvJ").innerHTML = `${Math.abs(o.jerk).toFixed(2)}<small>m/s³</small>`;
@@ -1309,22 +1377,24 @@ const detail = {
   /** 경사형 간단히: 직각삼각형 게이지 3개 (왼쪽 변 수직, 아래 변 앞뒤) */
   simpleIncl(A) {
     const m = A.m, ev = m.eval, I = m.incl, body = $("#dBody"), sn = Math.sin(I.theta * Math.PI / 180);
-    const worse = [ev.vibF, ev.vibL].filter(x => x && x.lv >= 0).sort((a, b) => b.lv - a.lv)[0] || { lv: -1, s: "기록이 없어요." };
     const along = I.speedAlong != null ? I.speedAlong : m.speedMax / sn;
     const br = ev.brief;
     const rows = [
       { k: "acc", lbl: "가감속도", u: "m/s²", v: Math.max(m.accMax, m.decMax).toFixed(2), f: Math.max(I.accMax, I.decMax).toFixed(2), lv: m.accPeak / sn / LEGEND_INC.acc,
         b: { lv: "n", t: br.acc }, p: "" },   // 경사형 UI (2026-11-27 사용자 피드백): 앞뒤 가감속 기준 한 줄, '가속 최대 ~' 줄 뺌
-      { k: "lat", lbl: "흔들림", u: "gal", v: I.vibF.n ? I.vibF.p98.toFixed(1) : "—", f: m.vibL && m.vibL.n ? m.vibL.p98.toFixed(1) : "—",
-        lv: Math.max(m.vibL ? m.vibL.p98 : 0, I.vibF.p98) / LEGEND_INC.lat, b: { lv: worse.lv, t: worse.s }, p: br.vib.join("\n") },   // Hz·'여요' 뺌   // 위아래 줄 · 앞뒤 줄을 나눠서 (2026-11-26)
+      { k: "lat", lbl: "흔들림", cube: true, c: [ppTxt(m.vibV), ppTxt(I.vibF), ppTxt(m.vibL)], lv: vibMax(m) / LEGEND_INC.cube, b: worstVib(ev), p: "" },   // 큐브: 상하·앞뒤·좌우 (2026-11-27)
       { k: "spd", lbl: "속력", u: "m/min", v: m.speedMax.toFixed(1), f: I.speedMax.toFixed(1), lv: along / LEGEND_INC.spd,
         b: { lv: "n", t: br.spd }, p: "" },   // '예요 (참고값)'·경사 변화 안내 뺌
     ];
     const size = isFlip() ? Math.round(clamp((innerWidth - 36) / 3.5, 66, 100)) : isWide() ? Math.round(clamp(Math.min(innerHeight * 0.36, innerWidth / 5.6), 140, 250)) : Math.round(clamp(innerWidth * 0.33, 110, 140));
     body.innerHTML = this.inclHead(I) + `<div class="d-rows incl-rows">${rows.map((r, i) => `<div class="d-row fade-in" style="animation-delay:${0.1 + i * 0.1}s">
         <div><div class="lbl">${r.lbl}</div><div class="g" id="ds-${r.k}"></div></div>
-        <div class="ev"><b class="lv${r.b.lv}">${esc(r.b.t)}</b>${r.p ? `<p>${esc(r.p)}</p>` : ""}</div></div>`).join("")}</div>`;
+        <div class="ev"><b class="lv${r.b.lv}">${esc(brk(r.b.t))}</b></div></div>`).join("")}</div>`;
     rows.forEach((r, i) => {
+      if (r.cube) {
+        const c = new CubeGauge(size); $(`#ds-${r.k}`).appendChild(c.el); c.vals(...r.c).level(0);
+        setTimeout(() => c.level(Math.max(r.lv, r.c.every(x => x === "—") ? 0 : 0.03)), 250 + i * 150); return;
+      }
       const g = new TriGauge(r.k, size, r.u); $(`#ds-${r.k}`).appendChild(g.el);
       g.vals(r.v, r.f, r.k === "spd" ? along.toFixed(1) : null).level(0);
       setTimeout(() => g.level(Math.max(r.lv, r.v === "—" ? 0 : 0.03)), 250 + i * 150);
@@ -1335,18 +1405,19 @@ const detail = {
     if (A.m.incl) return this.simpleIncl(A);
     const m = A.m, ev = m.eval, body = $("#dBody");
     const rows = [
-      { k: "acc", lbl: "가감속도", lv: m.accPeak / LEGEND.acc, n1: m.accMax.toFixed(2), n2: m.decMax.toFixed(2), u: "m/s²",
-        b: { lv: "n", t: ev.acc.t }, p: `가속 최대 ${m.accMax.toFixed(2)} · 감속 최대 ${m.decMax.toFixed(2)} m/s²` },
-      m.vibL && m.vibL.n
-        ? { k: "lat", lbl: "좌우 흔들림", lv: m.vibL.p98 / LEGEND.latA, n1: m.vibL.p98.toFixed(1), u: "gal", b: { lv: ev.vibL.lv, t: ev.vibL.s }, p: ev.vibL.line }
-        : { k: "lat", lbl: "좌우 흔들림", lv: 0, n1: "—", u: "gal", b: { lv: "n", t: "기록이 없어요." }, p: "" },
-      { k: "spd", lbl: "속력", lv: m.speedMax / LEGEND.spd, n1: m.speedMax.toFixed(1), u: "m/min", b: ev.speed, p: "" },
-    ];
+      { k: "acc", lbl: "가감속도", lv: m.accPeak / LEGEND.acc, n1: m.accMax.toFixed(2), n2: m.decMax.toFixed(2), u: "m/s²", b: { lv: "n", t: ev.acc.t } },
+      { k: "lat", lbl: "흔들림", cube: true, lv: vibMax(m) / LEGEND.cube, c: [ppTxt(m.vibV), ppTxt(m.vibF), ppTxt(m.vibL)], b: worstVib(ev) },
+      { k: "spd", lbl: "속력", lv: m.speedMax / LEGEND.spd, n1: m.speedMax.toFixed(1), u: "m/min", b: ev.speed },
+    ];   // 게이지 오른쪽의 작은 회색 글은 뺌 (2026-11-27 사용자 요청)
     const size = isFlip() ? Math.round(clamp((innerWidth - 36) / 3.4, 66, 104)) : isWide() ? Math.round(clamp(Math.min(innerHeight * 0.4, innerWidth / 5.2), 160, 280)) : Math.round(clamp(innerWidth * 0.36, 120, 160));
     body.innerHTML = `<div class="d-rows">${rows.map((r, i) => `<div class="d-row fade-in" style="animation-delay:${0.1 + i * 0.1}s">
         <div><div class="lbl">${r.lbl}</div><div id="ds-${r.k}"></div></div>
-        <div class="ev"><b class="lv${r.b.lv}">${esc(r.b.t)}</b>${r.p ? `<p>${esc(r.p)}</p>` : ""}</div></div>`).join("")}</div>`;
+        <div class="ev"><b class="lv${r.b.lv}">${esc(brk(r.b.t))}</b></div></div>`).join("")}</div>`;
     rows.forEach((r, i) => {
+      if (r.cube) {
+        const c = new CubeGauge(size); $(`#ds-${r.k}`).appendChild(c.el); c.vals(...r.c).level(0);
+        setTimeout(() => c.level(Math.max(r.lv, r.c.every(x => x === "—") ? 0 : 0.03)), 250 + i * 150); return;
+      }
       const s = new Sphere(r.k, size); $(`#ds-${r.k}`).appendChild(s.el);
       s.text(r.n1, r.n2 != null ? r.n2 : null, r.u).level(0);
       setTimeout(() => s.level(Math.max(r.lv, r.n1 === "—" ? 0 : 0.03)), 250 + i * 150);
@@ -1363,8 +1434,8 @@ const detail = {
       { l: "가감속도", v2: [["가속", m.accMax.toFixed(2)], ["감속", m.decMax.toFixed(2)]], u: "m/s²", e2: [`가속 ${ev.acc.a}`, `감속 ${ev.acc.d}`], lv: -1 },
       { l: "속력", v: m.speedMax.toFixed(1), u: "m/min", e: ev.speed.card || (m.speedMax <= 500 ? `${ev.speed.s} 승강기` : ev.speed.s), lv: -1 },
       { l: "운행 거리", v: m.distance.toFixed(1), u: "m", e: floors >= 1 ? `건물 약 ${floors}층 높이` : "거의 움직이지 않았어요", lv: -1 },
-      { l: "상하 흔들림", ...(m.vibV && m.vibV.n ? { v: m.vibV.p98.toFixed(1), u: "gal", e: ev.vibV.s, lv: ev.vibV.lv } : { v: "—", u: "", e: NO, lv: -1 }) },
-      { l: "좌우 흔들림", ...(m.vibL && m.vibL.n ? { v: m.vibL.p98.toFixed(1), u: "gal", e: ev.vibL.s, lv: ev.vibL.lv } : { v: "—", u: "", e: NO, lv: -1 }) },
+      { l: "상하 흔들림", ...(m.vibV && m.vibV.n ? { v: m.vibV.pp95.toFixed(1), u: "gal", e: ev.vibV.s, lv: ev.vibV.lv } : { v: "—", u: "", e: NO, lv: -1 }) },
+      { l: "좌우 흔들림", ...(m.vibL && m.vibL.n ? { v: m.vibL.pp95.toFixed(1), u: "gal", e: ev.vibL.s, lv: ev.vibL.lv } : { v: "—", u: "", e: NO, lv: -1 }) },
       { l: "출발 거칠기", ...gal(m.start, ev.start) },
       { l: "가감속 울렁임", ...gal(m.wave, ev.wave) },
       { l: "도착 거칠기", ...gal(m.arrive, ev.arrive) },
@@ -1388,7 +1459,7 @@ const detail = {
         { l: "경사도", v: I.changes.length ? `<span class="shrink">${[I.theta, ...I.changes.map(c => c.to)].map(v => v + "°").join("→")}</span>` : `${I.theta}°`, u: "", e: I.changes.length ? `운행 중 ${I.changes.length}번 바뀌었어요` : slope(I.theta), lv: -1 },
         { l: "앞뒤 가감속도", v2: [["가속", I.accMax.toFixed(2)], ["감속", I.decMax.toFixed(2)]], u: "m/s²", e2: [`가속 ${ev.fa.a}`, `감속 ${ev.fa.d}`], lv: -1 },
         { l: "앞뒤 속력", v: I.speedMax.toFixed(1), u: "m/min", e: `경사 방향 ${along.toFixed(1)} m/min`, lv: -1 },
-        { l: "앞뒤 흔들림", ...(I.vibF.n ? { v: I.vibF.p98.toFixed(1), u: "gal", e: ev.vibF.s, lv: ev.vibF.lv } : { v: "—", u: "", e: NO, lv: -1 }) },
+        { l: "앞뒤 흔들림", ...(I.vibF.n ? { v: I.vibF.pp95.toFixed(1), u: "gal", e: ev.vibF.s, lv: ev.vibF.lv } : { v: "—", u: "", e: NO, lv: -1 }) },
         { l: "수직 이동거리", v: I.distV.toFixed(1), u: "m", e: floors >= 1 ? `건물 약 ${floors}층 높이` : "거의 움직이지 않았어요", lv: -1 },
         { l: "앞뒤 이동거리", v: I.distF.toFixed(1), u: "m", e: `경사 방향 ${I.distAlong.toFixed(1)} m`, lv: -1 },
       ];

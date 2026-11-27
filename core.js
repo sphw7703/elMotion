@@ -51,6 +51,36 @@
     }
   }
 
+  /** 아날로그 2차 전달함수 (b2 s² + b1 s + b0)/(a2 s² + a1 s + a0) → 디지털 (쌍선형 변환, fp에서 주파수 맞춤) */
+  Biquad.analog = (b2, b1, b0, a2, a1, a0, fs, fp) => {
+    const K = 2 * Math.PI * fp / Math.tan(Math.PI * fp / fs), K2 = K * K;
+    const B0 = b2 * K2 + b1 * K + b0, B1 = 2 * b0 - 2 * b2 * K2, B2 = b2 * K2 - b1 * K + b0;
+    const A0 = a2 * K2 + a1 * K + a0, A1 = 2 * a0 - 2 * a2 * K2, A2 = a2 * K2 - a1 * K + a0;
+    return new Biquad(B0 / A0, B1 / A0, B2 / A0, A1 / A0, A2 / A0);
+  };
+  /* ───────── 인체 진동 감도 가중치 (ISO 8041 / ISO 2631-1, 2026-11-27 사용자 확정)
+     상하 Wk, 수평(앞뒤·좌우) Wd. 대역 제한(고역·저역)은 흔들림 필터가 맡고, 여기서는 전이·상향 단계만 */
+  class IsoWeight {
+    constructor(fs, kind) {
+      const w = f => 2 * Math.PI * f;
+      const Ht = (f3, f4, Q4) => Biquad.analog(0, 1 / w(f3), 1, 1 / w(f4) ** 2, 1 / (Q4 * w(f4)), 1, fs, Math.min(f4, fs / 4));
+      const Hs = (f5, Q5, f6, Q6) => { const b = Biquad.analog(1 / w(f5) ** 2, 1 / (Q5 * w(f5)), 1, 1 / w(f6) ** 2, 1 / (Q6 * w(f6)), 1, fs, f6), g = (f5 / f6) ** 2; b.b0 *= 1 / g * g; return [b, g]; };
+      if (kind === "k") { const [hs, g] = Hs(2.37, 0.91, 3.35, 0.91); this.f = [Ht(12.5, 12.5, 0.63), hs]; this.g = g; }
+      else { this.f = [Ht(2, 2, 0.63)]; this.g = 1; }
+    }
+    process(x) { for (const b of this.f) x = b.process(x); return x * this.g; }
+  }
+  /** 배열 전체에 가중치를 건다 (NaN이면 필터를 새로 시작) */
+  function weighArr(sig, kind, fs) {
+    if (!sig) return null;
+    const out = new Float32Array(sig.length); let w = null;
+    for (let i = 0; i < sig.length; i++) {
+      const v = sig[i]; if (Number.isNaN(v)) { out[i] = NaN; w = null; continue; }
+      if (!w) w = new IsoWeight(fs, kind); out[i] = w.process(v);
+    }
+    return out;
+  }
+
   /* ───────── 리샘플러: 어떤 센서 속도든 정확히 60 Hz ───────── */
   class Resampler {
     constructor(rate, cb) { this.period = 1000 / rate; this.cb = cb; this.reset(); }
@@ -179,19 +209,23 @@
       this.hpL = Biquad.make(P.LAT_HP, fs, true);
       this.lpV = Biquad.make(P.VIB_LP, fs, false);
       this.lpL = Biquad.make(P.VIB_LP, fs, false);
-      this.ppV = new PeakToPeak(fs); this.ppL = new PeakToPeak(fs);
+      this.ppV = new PeakToPeak(fs); this.ppL = new PeakToPeak(fs); this.ppF = new PeakToPeak(fs);
+      // 실시간 p-p는 ISO 8041 가중치를 건 값 (상하 Wk, 앞뒤·좌우 Wd) — 2026-11-27
+      this.wV = new IsoWeight(fs, "k"); this.wL = new IsoWeight(fs, "d"); this.wF = new IsoWeight(fs, "d");
+      this.hpF = Biquad.make(P.LAT_HP, fs, true); this.lpF = Biquad.make(P.VIB_LP, fs, false);
       this.v = 0; this.bias = 0; this.moving = false; this.peak = 0; this.quiet = 0; this.dist = 0;
       this.prevJ = 0; this.first = true; this.hold = 0;
       this.quietN = Math.round(P.QUIET_SEC * fs);
-      this.out = { acc: 0, mot: 0, jerk: 0, vibV: 0, vibL: 0, speed: 0, dist: 0, moving: false, ppV: 0, ppL: 0 };
+      this.out = { acc: 0, mot: 0, jerk: 0, vibV: 0, vibL: 0, vibF: NaN, speed: 0, dist: 0, moving: false, ppV: 0, ppL: 0, ppF: NaN };
     }
     /** 움직이는 중에 시작했을 때: 처음 속력(m/s)을 정해 준다 */
     seed(v) { this.v = v; this.moving = true; this.peak = Math.abs(v); }
     /** 지금 상태 그대로 복사 (분석 중 되돌아가 다시 계산할 때) */
     clone() {
       const c = Object.assign(Object.create(RideAnalyzer.prototype), this);
-      for (const k of ["lpAcc", "lpMot", "lpJ1", "lpJ2", "hpV", "hpL", "lpV", "lpL"]) c[k] = Object.assign(Object.create(Biquad.prototype), this[k]);
-      for (const k of ["ppV", "ppL"]) c[k] = Object.assign(Object.create(PeakToPeak.prototype), this[k], { list: this[k].list.slice() });
+      for (const k of ["lpAcc", "lpMot", "lpJ1", "lpJ2", "hpV", "hpL", "lpV", "lpL", "hpF", "lpF"]) c[k] = Object.assign(Object.create(Biquad.prototype), this[k]);
+      for (const k of ["wV", "wL", "wF"]) c[k] = Object.assign(Object.create(IsoWeight.prototype), this[k], { f: this[k].f.map(b => Object.assign(Object.create(Biquad.prototype), b)) });
+      for (const k of ["ppV", "ppL", "ppF"]) c[k] = Object.assign(Object.create(PeakToPeak.prototype), this[k], { list: this[k].list.slice() });
       c.out = Object.assign({}, this.out);
       return c;
     }
@@ -203,8 +237,8 @@
     get still() {
       return !this.moving || (this.quiet >= 0.3 * this.fs && Math.abs(this.v) < Math.max(P.STOP_ABS, P.STOP_RATIO * this.peak));
     }
-    /** vert/lat: m/s² (중력 제거). lat 이 NaN 이면 좌우 없음 */
-    push(vertIn, lat) {
+    /** vert/lat/lon: m/s² (중력 제거). lat 이 NaN 이면 좌우 없음, lon 이 없으면 앞뒤 없음 */
+    push(vertIn, lat, lon = NaN) {
       const vert = vertIn - this.bias;
       const acc = this.lpAcc.process(vert);
       const mot = this.lpMot.process(vert);
@@ -214,7 +248,8 @@
       const jerk = this.lpJ2.process(jRaw);
       const vibV = this.lpV.process(this.hpV.process(vert)) * 100;
       const vibL = Number.isNaN(lat) ? NaN : this.lpL.process(this.hpL.process(lat)) * 100;
-      this.ppV.push(vibV); if (!Number.isNaN(vibL)) this.ppL.push(vibL);
+      const vibF = Number.isNaN(lon) ? NaN : this.lpF.process(this.hpF.process(lon)) * 100;
+      this.ppV.push(this.wV.process(vibV)); if (!Number.isNaN(vibL)) this.ppL.push(this.wL.process(vibL)); if (!Number.isNaN(vibF)) this.ppF.push(this.wF.process(vibF));
 
       // 속력: 가감속 없을 땐 적분 중지, 정지 판단 시 0, 정지 중 바이어스 학습
       const quiet = Math.abs(mot) < P.DEAD;
@@ -230,9 +265,9 @@
       this.dist += Math.abs(this.v) * this.dt;
 
       const o = this.out;
-      o.acc = acc; o.mot = mot; o.jerk = jerk; o.vibV = vibV; o.vibL = vibL;
+      o.acc = acc; o.mot = mot; o.jerk = jerk; o.vibV = vibV; o.vibL = vibL; o.vibF = vibF;
       o.speed = this.v * 60; o.dist = this.dist; o.moving = this.moving;
-      o.ppV = this.ppV.live(); o.ppL = Number.isNaN(vibL) ? NaN : this.ppL.live();
+      o.ppV = this.ppV.live(); o.ppL = Number.isNaN(vibL) ? NaN : this.ppL.live(); o.ppF = Number.isNaN(vibF) ? NaN : this.ppF.live();
       return o;
     }
   }
@@ -356,11 +391,11 @@
     /** hp: 흔들림 고역통과 (앞뒤는 가감속이 섞이므로 상하와 같은 P.VERT_HP, 좌우는 P.LAT_HP) */
     constructor(fs = FS, hp = P.VERT_HP) {
       this.lpAcc = Biquad.make(P.ACC_LP, fs, false); this.hp = Biquad.make(hp, fs, true); this.lp = Biquad.make(P.VIB_LP, fs, false);
-      this.pp = new PeakToPeak(fs); this.out = { acc: 0, vib: 0, pp: 0 };
+      this.pp = new PeakToPeak(fs); this.w = new IsoWeight(fs, "d"); this.out = { acc: 0, vib: 0, pp: 0 };
     }
     push(x) {
       const o = this.out; o.acc = this.lpAcc.process(x); o.vib = this.lp.process(this.hp.process(x)) * 100;
-      this.pp.push(o.vib); o.pp = this.pp.live(); return o;
+      this.pp.push(this.w.process(o.vib)); o.pp = this.pp.live(); return o;
     }
   }
 
@@ -525,11 +560,14 @@
     // 실제 휴대폰 센서 값은 잡음 때문에 정확히 0이 거의 나오지 않는다
     let hasLat = false;
     if (lat && lat.length) { let z = 0; for (let i = 0; i < lat.length; i++) if (Math.abs(lat[i]) <= 1e-6) z++; hasLat = z < 0.5 * lat.length; }
+    // 앞뒤 축 (2026-11-27): 휴대폰의 둘째 수평축이 기록된 경우에만
+    let hasLon = false;
+    if (hasLat && lon && lon.length === n) { let z = 0; for (let i = 0; i < n; i++) if (Math.abs(lon[i]) <= 1e-6) z++; hasLon = z < 0.5 * n; }
     const plan = planSegs(vert, n, segs, fs);
     const bounds = plan.groups.map(g => [g.s, g.e]);
     const S = {
       acc: new Float32Array(n), jerk: new Float32Array(n), vibV: new Float32Array(n),
-      vibL: new Float32Array(n), speed: new Float32Array(n), dist: new Float32Array(n),
+      vibL: new Float32Array(n), vibF: new Float32Array(n).fill(NaN), speed: new Float32Array(n), dist: new Float32Array(n),
     };
     const mot = new Float32Array(n), moving = new Uint8Array(n);
     /* 실제 정지 순간 (착상 포함, 2026-11-24 사용자 확정)
@@ -568,8 +606,8 @@
       for (let guard = 0; guard < 40; guard++) {
         for (let i = from; i < e; i++) {
           if (an.stopNext) snaps.set(i, an.clone());
-          const o = an.push(vert[i], hasLat ? lat[i] : NaN);
-          S.acc[i] = o.acc; S.jerk[i] = o.jerk; S.vibV[i] = o.vibV; S.vibL[i] = hasLat ? o.vibL : NaN;
+          const o = an.push(vert[i], hasLat ? lat[i] : NaN, hasLon ? lon[i] : NaN);
+          S.acc[i] = o.acc; S.jerk[i] = o.jerk; S.vibV[i] = o.vibV; S.vibL[i] = hasLat ? o.vibL : NaN; if (hasLon) S.vibF[i] = o.vibF;
           S.speed[i] = o.speed; S.dist[i] = distOff + o.dist; mot[i] = o.mot; moving[i] = o.moving ? 1 : 0;
         }
         const fix = prematureStop(S.speed, mot, moving, snaps, from, s, e, fs);
@@ -793,9 +831,11 @@
     const lMask = vMask;
 
     // 상하·좌우 흔들림: 정속 구간의 절댓값 98% 피크 (2026-11-26 사용자 확정, 예전 A95)
-    const none = { a95: 0, p98: 0, max: 0, freq: 0, bumps: 0, spikes: 0, seconds: 0, n: 0 };
-    const vibV = texture(S.vibV, vMask, fs) || none;
-    const vibL = hasLat ? (texture(S.vibL, lMask, fs) || none) : null;
+    const none = { a95: 0, p98: 0, pp95: 0, ppMax: 0, max: 0, freq: 0, bumps: 0, spikes: 0, seconds: 0, n: 0 };
+    // 세기는 ISO 8041 가중치(상하 Wk, 수평 Wd)를 건 인접 피크 투 피크의 A95 (2026-11-27 사용자 확정, ISO 18738-1 · ISO 8100-34)
+    const vibV = texture(S.vibV, vMask, fs, weighArr(S.vibV, "k", fs)) || none;
+    const vibL = hasLat ? (texture(S.vibL, lMask, fs, weighArr(S.vibL, "d", fs)) || none) : null;
+    const vibF = hasLon ? (texture(S.vibF, lMask, fs, weighArr(S.vibF, "d", fs)) || none) : null;
 
     // 가속/감속: 움직임 방향 기준
     const lev = levelings(vert, S.speed, trips, fs), levMask = new Uint8Array(n);
@@ -816,7 +856,7 @@
       duration: n / fs, trips: trips.length,
       accMax, decMax, accPeak: Math.max(accMax, decMax),
       jerkMax, jerk: q.jerk, start: q.start, arrive: q.arrive, wave: q.wave, waveFreq: q.waveFreq, riseA: q.riseA, relD: q.relD, tripQ: q.trips,
-      vibV, vibL, speedUp: up, speedDown: down, speedMax: Math.max(up, down),
+      vibV, vibL, vibF, speedUp: up, speedDown: down, speedMax: Math.max(up, down),
       speedPeak: Math.max(up, down), speedRef: false, speedShort: false,
       distance: n ? S.dist[n - 1] : 0, cruise: cruise.map(([a, b]) => [a / fs, b / fs]),
       pauses: plan.raw.slice(1).map(([s]) => s / fs),
@@ -980,13 +1020,13 @@
         if (a * dir > 0) facc = Math.max(facc, Math.abs(a)); else fdec = Math.max(fdec, Math.abs(a));
       }
     }
-    const none = { a95: 0, p98: 0, max: 0, freq: 0, bumps: 0, spikes: 0, seconds: 0, n: 0 };
+    const none = { a95: 0, p98: 0, pp95: 0, ppMax: 0, max: 0, freq: 0, bumps: 0, spikes: 0, seconds: 0, n: 0 };
     const tm = Math.round(theta0), cot0 = 1 / Math.tan(theta0 * Math.PI / 180), sin0 = Math.sin(theta0 * Math.PI / 180);
-    m.vibL = texture(vibL, vMask, fs) || none;
+    m.vibL = texture(vibL, vMask, fs, weighArr(vibL, "d", fs)) || none;
     m.incl = {
       theta: tm, thetaEnd: changes.length ? changes[changes.length - 1].to : tm, changes,
       accMax: facc, decMax: fdec,
-      vibF: texture(vibF, vMask, fs) || none,
+      vibF: texture(vibF, vMask, fs, weighArr(vibF, "d", fs)) || none,
       speedMax: fsp, speedAlong: asp,
       distV: m.distance, distF: dF, distAlong: dA,
     };
@@ -1089,7 +1129,7 @@
     };
   }
   /** 흔들림의 세기(절댓값 98% 피크)와 결(주파수·튀는 횟수) */
-  function texture(sig, mask, fs) {
+  function texture(sig, mask, fs, wsig) {
     const vals = []; let zc = 0, prev = 0;
     for (let i = 0; i < sig.length; i++) {
       if (!mask[i] || Number.isNaN(sig[i])) { prev = 0; continue; }
@@ -1118,7 +1158,8 @@
       if (q >= HIT_GAL && q >= Math.abs(sig[i - 1]) && q >= Math.abs(sig[i + 1]) && i - lastH > 0.25 * fs) { hits++; lastH = i; }
     }
     const seconds = vals.length / fs;
-    return { a95, p98, max, freq: zc / 2 / seconds, bumps, spikes: bumps, hits, hitRate: hits / seconds * 10, seconds, n: vals.length };
+    const pp = ppStats(wsig || sig, mask, fs);   // 평가 세기: 가중 피크 투 피크 A95와 최대값
+    return { a95, p98, pp95: pp.a95, ppMax: pp.max, max, freq: zc / 2 / seconds, bumps, spikes: bumps, hits, hitRate: hits / seconds * 10, seconds, n: vals.length };
   }
   const HIT_GAL = 8;
   /** 흔들림의 결: none(거의 없음) · single(한 번 툭) · sway(출렁, 3 Hz 이하) · tap(툭툭) */
@@ -1155,11 +1196,11 @@
        힘을 주는 시간 1.4초 이상 '슬며시', 0.55초 이하 '엣지 있게' / 힘을 빼는 시간 1.5초 이상 '슬며시', 0.5초 이하 '딱 끊어'
        흔들림의 결: 3 Hz 이하 출렁, 그 위 툭툭, 평소의 2.5배 넘게 한두 번만 튀면 '한 번 툭'
      속력: ~70 저속, ~130 중속, ~250 고속, ~500 초고속, 그 이상 '초고속의 초월' */
-  const EVAL_VER = 37;
+  const EVAL_VER = 38;   // 38: 흔들림 3축(상하·앞뒤·좌우) ISO 8041 가중 p-p A95, 10·15·20·25 gal (2026-11-27)
   const GRADE = ["아주 좋음", "좋음", "보통", "나쁨", "매우 나쁨"];
-  const TH = { jerk: [0.8, 1.0, 1.4, 1.8], vibV: [15, 20, 30, 40], vibL: [10, 15, 25, 35], wave: [15, 30, 45, 60], start: [20, 40, 60, 90], arrive: [20, 40, 60, 90], hit: [1, 2, 4, 8] };
-  const TH_INC = Object.assign({}, TH, { vibV: TH.vibV.map(v => v * 2), vibL: TH.vibL.map(v => v * 2) });   // 경사형: 흔들림 기준 2배
-  const DEC = { jerk: 2, vibV: 1, vibL: 1, wave: 0, start: 0, arrive: 0, hit: 1 };
+  const TH = { jerk: [0.8, 1.0, 1.4, 1.8], vibV: [10, 15, 20, 25], vibL: [10, 15, 20, 25], vibF: [10, 15, 20, 25], wave: [15, 30, 45, 60], start: [20, 40, 60, 90], arrive: [20, 40, 60, 90], hit: [1, 2, 4, 8] };
+  const TH_INC = Object.assign({}, TH, { vibV: TH.vibV.map(v => v * 2), vibL: TH.vibL.map(v => v * 2), vibF: TH.vibF.map(v => v * 2) });   // 경사형: 흔들림 기준 2배
+  const DEC = { jerk: 2, vibV: 1, vibL: 1, vibF: 1, wave: 0, start: 0, arrive: 0, hit: 1 };
   function levelOf(v, key, th = TH) {
     if (v == null) return null;
     const r = +v.toFixed(DEC[key]), t = th[key];   // 화면에 보이는 자릿수로 판정해 숫자와 평이 어긋나지 않게
@@ -1346,15 +1387,16 @@
   function evaluateBase(m, inc) {
     const th = inc ? TH_INC : TH;
     // 상하 흔들림: 세기(|98% 피크|)와 툭툭 빈도 중 나쁜 쪽. 문장은 세기만으로 고른다 (빈도는 드러내지 않음)
-    const vibVa = m.vibV && m.vibV.n ? levelOf(m.vibV.p98, "vibV", th) : null;
+    const vibVa = m.vibV && m.vibV.n ? levelOf(m.vibV.pp95, "vibV", th) : null;
     const vibVh = !inc && m.vibV && m.vibV.seconds >= 5 ? levelOf(m.vibV.hitRate, "hit") : null;   // 경사형은 툭툭 빈도를 평가에서 뺀다 (2026-11-26 사용자 확정)
     const L = {
       jerk: levelOf(m.jerk, "jerk"),
       vibV: vibVa == null ? null : Math.max(vibVa, vibVh || 0),
-      vibL: m.vibL && m.vibL.n ? levelOf(m.vibL.p98, "vibL", th) : null,
+      vibL: m.vibL && m.vibL.n ? levelOf(m.vibL.pp95, "vibL", th) : null,
       wave: levelOf(m.wave, "wave"), start: levelOf(m.start, "start"), arrive: levelOf(m.arrive, "arrive"),
     };
-    if (inc) L.vibF = inc.vibF && inc.vibF.n ? levelOf(inc.vibF.p98, "vibL", th) : null;
+    const F = inc ? inc.vibF : m.vibF;   // 앞뒤 흔들림 (일반은 휴대폰 둘째 수평축, 경사형은 경사 방향)
+    if (F) L.vibF = F.n ? levelOf(F.pp95, "vibF", th) : null;
     const lv = Object.values(L).filter(v => v != null).sort((a, b) => b - a);
     const overall = !lv.length ? null : lv.length === 1 ? lv[0] : Math.floor((lv[0] + lv[1]) / 2);
     const perfect = lv.length >= 3 && lv[0] === 0;
@@ -1374,7 +1416,7 @@
       jerk: g("jerk"), wave: g("wave"), start: g("start"), arrive: g("arrive"),
       vibV: { ...g("vibV"), line: vibLine(m.vibV, true, seed, L.vibV === 0) },
       vibL: m.vibL ? { ...g("vibL"), line: vibLine(m.vibL, false, seed) } : null,
-      vibF: inc && inc.vibF ? { ...g("vibF"), line: vibLine(inc.vibF, false, seed).replace("좌우로", "앞뒤로") } : null,
+      vibF: F ? { ...g("vibF"), line: vibLine(F, false, seed).replace("좌우로", "앞뒤로") } : null,
       // 정격 속력에 닿기 전에 감속한 짧은 운행 / 기록이 잘려 일부 구간으로만 잰 값 (2026-11-25 사용자 확정)
       speed: m.speedShort ? { lv: 0, t: "정격 속력에 닿기 전에 멈췄어요", s: sg.s, card: "정격 속력 미도달" }
         : m.speedRef ? { lv: 0, t: `${sg.t} (참고값)`, s: sg.s, card: `${m.speedMax <= 500 ? sg.s + " 승강기" : sg.s} · 참고값` }
@@ -1636,7 +1678,7 @@
   }
 
   const Core = {
-    FS, P, Biquad, Resampler, StabilityDetector, Calibration, AbnormalDetector, PeakToPeak, RideAnalyzer, InclineDetector, AxisChannel, INC,
+    FS, P, Biquad, Resampler, StabilityDetector, Calibration, AbnormalDetector, PeakToPeak, RideAnalyzer, InclineDetector, AxisChannel, INC, IsoWeight, weighArr,
     analyze, segBounds, accLv, evaluate, aiText, vibKind, GRADE, TH, WORDS, _dbg: { zp, texture, rideQuality }, EVAL_VER, ppStats, percentile, parseCsv, importCsv, importTxt, TXT_BAD, exportCsv, DemoSignal,
   };
   if (typeof module !== "undefined" && module.exports) module.exports = Core;

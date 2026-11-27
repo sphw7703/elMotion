@@ -194,6 +194,41 @@ const videoMaker = (() => {
     if (unit) { g.font = F(700, us); g.fillStyle = P.ink3; g.fillText(unit, x + d * .95 + 2, y + d * .9 + us); }
     g.restore();
   }
+  /** 흔들림 큐브 (앱의 CubeGauge와 같은 모양·색, 2026-11-27). cx, cy: 가운데, d: 폭. vals: [상하, 앞뒤, 좌우] */
+  function cubeGauge(g, P, cx, cy, d, level, vals) {
+    const a0 = g.globalAlpha, k = d / 180, x0 = cx - d / 2, y0 = cy - d * 1.044 / 2;
+    g.save(); g.translate(x0, y0); g.scale(k, k); g.translate(-10, -6);
+    const img = P.cubeGlass, flt = P.dark ? "brightness(1.35) contrast(1.05)" : "brightness(1.12) saturate(.75)";
+    if (img) { g.filter = flt; g.drawImage(img, 0, 0, 200, 200); g.filter = "none"; }
+    if (level > 0) {
+      const W = CUBE.water(Math.max(level, .045)).map(s => s.split(" ").map(p => p.split(",").map(Number)));
+      const poly = a => { g.beginPath(); a.forEach((p, i) => (i ? g.lineTo(p[0], p[1]) : g.moveTo(p[0], p[1]))); g.closePath(); };
+      const lg = g.createLinearGradient(0, 0, 0, 200); lg.addColorStop(0, "#FFB49E"); lg.addColorStop(.6, "#FF7E62"); lg.addColorStop(1, "#E0533C");
+      g.globalAlpha = a0 * .85; poly(W[0]); g.fillStyle = lg; g.fill();
+      g.globalAlpha = a0 * .6; poly(W[1]); g.fillStyle = "#FFB49E"; g.fill(); g.globalAlpha = a0;
+    }
+    if (img) { g.save(); g.filter = flt; g.globalCompositeOperation = "screen"; g.globalAlpha = a0 * (P.dark ? .3 : .4); g.drawImage(img, 0, 0, 200, 200); g.restore(); }
+    // 좌측 상단 반사광 (앱의 .cb-hl과 같은 모양)
+    { g.save(); g.beginPath(); CUBE.OUT.split(" ").forEach((s, i) => { const p = s.split(",").map(Number); i ? g.lineTo(p[0], p[1]) : g.moveTo(p[0], p[1]); }); g.closePath(); g.clip();
+      g.globalAlpha = a0 * (P.dark ? .7 : .95);
+      const rg = g.createRadialGradient(38, 48, 0, 38, 48, 78); rg.addColorStop(0, "rgba(255,255,255,.62)"); rg.addColorStop(.5, "rgba(255,255,255,.16)"); rg.addColorStop(1, "rgba(255,255,255,0)");
+      g.fillStyle = rg; g.fillRect(0, 0, 200, 200);
+      g.restore(); }
+    // 글자: 면 한가운데, 면 기울기에 맞춰 (윗면 상하 · 왼쪽 면 앞뒤 · 오른쪽 면 좌우), 흰색
+    g.fillStyle = "#fff"; g.textAlign = "center"; g.textBaseline = "alphabetic"; g.shadowColor = "rgba(19,26,43,.45)"; g.shadowBlur = 2 * k; g.shadowOffsetY = 1 * k;
+    const face = (m, lab, val, unit) => {
+      g.save(); g.transform(...m);
+      g.font = F(800, 13.2); g.globalAlpha = a0 * .9; g.fillText(lab, 0, -18); g.globalAlpha = a0;
+      g.font = F(800, 26.4); const w = g.measureText(val).width;
+      if (unit) { g.font = F(700, 12); const uw = g.measureText(" gal").width; g.font = F(800, 26.4); g.textAlign = "left"; g.fillText(val, -(w + uw) / 2, 10); g.font = F(700, 12); g.fillText(" gal", -(w + uw) / 2 + w, 10); }
+      else g.fillText(val, 0, 10);
+      g.restore();
+    };
+    face([1, 0, 0, .62, 99.8, 40.3], "상하", vals[0], true);
+    face([.922, .388, 0, 1, 57.3, 112.8], "앞뒤", vals[1]);
+    face([.922, -.388, 0, 1, 142.4, 113.1], "좌우", vals[2]);
+    g.restore();
+  }
   function star(g, cx, cy, s) {
     g.save(); g.translate(cx - s / 2, cy - s / 2); g.scale(s / 15, s / 15.1); g.translate(-4.5, -2.5);
     g.fill(new Path2D("M12 2.5c.6 4.6 2.9 6.9 7.5 7.5v.1c-4.6.6-6.9 2.9-7.5 7.5h-.1c-.6-4.6-2.9-6.9-7.5-7.5V10c4.6-.6 6.9-2.9 7.5-7.5z")); g.restore();
@@ -333,7 +368,8 @@ const videoMaker = (() => {
     const pal = (dark ? RAINBOW.dark : RAINBOW.light).slice(); for (let i = pal.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [pal[i], pal[j]] = [pal[j], pal[i]]; }
     try { await document.fonts.load(F(800, 40)); await document.fonts.load(F(200, 40)); await document.fonts.load(F(400, 20)); } catch (e) { /* 기본 글꼴 */ }
     const P = { key: true, dark, ink: "#131A2B", ink2: "#48526A", ink3: "#8691A7", colors: pal, glass: await loadImg(dark ? "assets/glass-dark.webp" : "assets/glass.webp"),
-      triGlass: await loadImg(dark ? "assets/glass-tri-dark.webp" : "assets/glass-tri.webp"), triSil: await loadImg("assets/glass-tri-sil.webp") };
+      triGlass: await loadImg(dark ? "assets/glass-tri-dark.webp" : "assets/glass-tri.webp"), triSil: await loadImg("assets/glass-tri-sil.webp"),
+      cubeGlass: await loadImg(dark ? "assets/glass-cube-dark.webp" : "assets/glass-cube.webp") };
     // 게이지가 사라진 뒤의 장면은 모두 다크 모드 디자인 (2026-11-25 사용자 확정). 무지개 순서는 같게
     const order = pal.map(c => (dark ? RAINBOW.dark : RAINBOW.light).indexOf(c));
     const P2 = { key: true, dark: true, ink: "#EEF2FF", ink2: "#A6B0CC", ink3: "#6B7594", colors: order.map(i => RAINBOW.dark[i]), glass: P.glass };
@@ -346,25 +382,24 @@ const videoMaker = (() => {
     // 장면 1: 간단히 게이지 3개
     const gauges = [
       { k: "acc", lbl: "가감속도", lv: m.accPeak / LEGEND.acc, a: m.accMax.toFixed(2), bv: m.decMax.toFixed(2), u: "m/s²" },
-      { k: "lat", lbl: "좌우 흔들림", lv: m.vibL && m.vibL.n ? m.vibL.p98 / LEGEND.latA : 0, a: m.vibL && m.vibL.n ? m.vibL.p98.toFixed(1) : "—", bv: null, u: "gal" },
+      { k: "lat", lbl: "흔들림", cube: true, lv: vibMax(m) / LEGEND.cube, a: vibMax(m) > 0 ? "" : "—", c: [ppTxt(m.vibV), ppTxt(m.vibF), ppTxt(m.vibL)], bv: null, u: "gal" },   // 큐브 (2026-11-27)
       { k: "spd", lbl: "속력", lv: m.speedMax / LEGEND.spd, a: m.speedMax.toFixed(1), bv: null, u: "m/min" },
     ];
     // 게이지 아래 글 (간단히 화면과 같은 내용): 위 라벨은 앱의 3배, 아래 글은 2배 (1920 폭 기준 76 · 64 · 44px)
     const sent = x => (/[.!?요]$/.test(x) ? (/[요]$/.test(x) ? x + "." : x) : x + ".");
     const accB = /^가속은 .+ 감속은 /.test(ev.acc.t) ? ev.acc.t.replace(/ 감속은 /, ",\n감속은 ").split("\n").map((l, i) => (i ? sent(l) : l)) : [sent(ev.acc.t)];
     gauges[0].b = accB; gauges[0].bl = -1; gauges[0].p = "";                                     // '가속 최대 ~' 줄은 뺌 (사용자 확정)
-    if (m.vibL && m.vibL.n) { gauges[1].b = [ev.vibL.s]; gauges[1].bl = ev.vibL.lv; gauges[1].bScale = 1.3; /* '좋음' 같은 등급 글자는 130% */ gauges[1].p = ev.vibL.line.replace(/ · 약 [\d.]+ Hz$/, ""); /* '약 7.5 Hz'는 뺌 */ }
+    if (vibMax(m) > 0) { const w = worstVib(ev); gauges[1].b = [w.t]; gauges[1].bl = w.lv; gauges[1].bScale = 1.3; /* '좋음' 같은 등급 글자는 130% */ gauges[1].p = ev.vibL ? ev.vibL.line.replace(/ · 약 [\d.]+ Hz$/, "") : ""; /* '약 7.5 Hz'는 뺌 */ }
     else { gauges[1].b = ["기록이 없어요."]; gauges[1].bl = -1; gauges[1].p = ""; }
     gauges[2].b = [ev.speed.t.replace(/요$/, "요.")]; gauges[2].bl = 0; gauges[2].p = "";
     // 경사형 (2026-11-26 사용자 확정): 앱의 간단히와 같은 직각삼각형 게이지 (왼쪽 변 수직, 아래 변 앞뒤)
     const I = m.incl, TRI = !!I;
     if (I) {
       const sn = Math.sin(I.theta * Math.PI / 180), along = I.speedAlong != null ? I.speedAlong : m.speedMax / sn;
-      const worse = [ev.vibF, ev.vibL].filter(x => x && x.lv >= 0).sort((a, b) => b.lv - a.lv)[0] || { lv: -1, s: "기록이 없어요." };
       gauges[0].lbl = "가감속도"; gauges[0].lv = m.accPeak / sn / LEGEND_INC.acc; gauges[0].a = Math.max(m.accMax, m.decMax).toFixed(2); gauges[0].bv = Math.max(I.accMax, I.decMax).toFixed(2);
-      gauges[1].lbl = "흔들림"; gauges[1].lv = Math.max(m.vibL ? m.vibL.p98 : 0, I.vibF.p98) / LEGEND_INC.lat;
-      gauges[1].a = I.vibF.n ? I.vibF.p98.toFixed(1) : "—"; gauges[1].bv = m.vibL && m.vibL.n ? m.vibL.p98.toFixed(1) : "—"; gauges[1].lv1 = "앞뒤"; gauges[1].lf1 = "좌우";
-      gauges[1].b = [worse.s]; gauges[1].bl = worse.lv; gauges[1].bScale = 1.3;
+      gauges[1].lbl = "흔들림"; gauges[1].lv = vibMax(m) / LEGEND_INC.cube; gauges[1].c = [ppTxt(m.vibV), ppTxt(I.vibF), ppTxt(m.vibL)];   // 큐브 (2026-11-27)
+      gauges[1].a = vibMax(m) > 0 ? "" : "—";
+      { const w = worstVib(ev); gauges[1].b = [w.t]; gauges[1].bl = w.lv === "n" ? -1 : w.lv; } gauges[1].bScale = 1.3;
       gauges[1].p = ev.brief.vib.join("\n");   // 앞뒤 · 좌우 줄을 나눠서 (간결한 글, 2026-11-27)
       gauges[2].lv = along / LEGEND_INC.spd; gauges[2].a = m.speedMax.toFixed(1); gauges[2].bv = I.speedMax.toFixed(1);
       gauges[2].al = along.toFixed(1); gauges[2].b = [ev.brief.spd]; gauges[2].bl = -1;
@@ -405,8 +440,8 @@ const videoMaker = (() => {
       { l: "가감속도", v2: [["가속", m.accMax.toFixed(2)], ["감속", m.decMax.toFixed(2)]], u: "m/s²", e2: [`가속 ${ev.acc.a}`, `감속 ${ev.acc.d}`], lv: -1 },
       { l: "속력", v: m.speedMax.toFixed(1), u: "m/min", e: ev.speed.card || (m.speedMax <= 500 ? `${ev.speed.s} 승강기` : ev.speed.s), lv: -1 },
       { l: "운행 거리", v: m.distance.toFixed(1), u: "m", e: Math.ceil(m.distance / 2.55 - 1e-9) >= 1 ? `건물 약 ${Math.ceil(m.distance / 2.55 - 1e-9)}층 높이` : "거의 움직이지 않았어요", lv: -1 },
-      { l: "상하 흔들림", ...(m.vibV && m.vibV.n ? { v: m.vibV.p98.toFixed(1), u: "gal", e: ev.vibV.s, lv: ev.vibV.lv } : { v: "—", u: "", e: NO, lv: -1 }) },
-      { l: "좌우 흔들림", ...(m.vibL && m.vibL.n ? { v: m.vibL.p98.toFixed(1), u: "gal", e: ev.vibL.s, lv: ev.vibL.lv } : { v: "—", u: "", e: NO, lv: -1 }) },
+      { l: "상하 흔들림", ...(m.vibV && m.vibV.n ? { v: m.vibV.pp95.toFixed(1), u: "gal", e: ev.vibV.s, lv: ev.vibV.lv } : { v: "—", u: "", e: NO, lv: -1 }) },
+      { l: "좌우 흔들림", ...(m.vibL && m.vibL.n ? { v: m.vibL.pp95.toFixed(1), u: "gal", e: ev.vibL.s, lv: ev.vibL.lv } : { v: "—", u: "", e: NO, lv: -1 }) },
       { l: "출발 거칠기", ...gal(m.start, ev.start) }, { l: "가감속 울렁임", ...gal(m.wave, ev.wave) }, { l: "도착 거칠기", ...gal(m.arrive, ev.arrive) },
     ];
     // 경사형 (2026-11-26 사용자 확정): 앱의 자세히와 같이 머리글 + 경사형 지표 6개 + '기본 지표 · 수직 방향' + 9개, 그래프에 앞뒤 2개
@@ -418,7 +453,7 @@ const videoMaker = (() => {
         { l: "경사도", v: I.changes.length ? [I.theta, ...I.changes.map(c => c.to)].map(v => v + "°").join("→") : `${I.theta}°`, small: I.changes.length > 0, u: "", e: I.changes.length ? `운행 중 ${I.changes.length}번 바뀌었어요` : slope(I.theta), lv: -1 },
         { l: "앞뒤 가감속도", v2: [["가속", I.accMax.toFixed(2)], ["감속", I.decMax.toFixed(2)]], u: "m/s²", e2: [`가속 ${ev.fa.a}`, `감속 ${ev.fa.d}`], lv: -1 },
         { l: "앞뒤 속력", v: I.speedMax.toFixed(1), u: "m/min", e: `경사 방향 ${along.toFixed(1)} m/min`, lv: -1 },
-        { l: "앞뒤 흔들림", ...(I.vibF.n ? { v: I.vibF.p98.toFixed(1), u: "gal", e: ev.vibF.s, lv: ev.vibF.lv } : { v: "—", u: "", e: NO, lv: -1 }) },
+        { l: "앞뒤 흔들림", ...(I.vibF.n ? { v: I.vibF.pp95.toFixed(1), u: "gal", e: ev.vibF.s, lv: ev.vibF.lv } : { v: "—", u: "", e: NO, lv: -1 }) },
         { l: "수직 이동거리", v: I.distV.toFixed(1), u: "m", e: floors >= 1 ? `건물 약 ${floors}층 높이` : "거의 움직이지 않았어요", lv: -1 },
         { l: "앞뒤 이동거리", v: I.distF.toFixed(1), u: "m", e: `경사 방향 ${I.distAlong.toFixed(1)} m`, lv: -1 },
       ];
@@ -463,7 +498,8 @@ const videoMaker = (() => {
           g.save(); g.globalAlpha *= kA; g.translate(x, y); g.scale(.7 + .3 * kIn, .7 + .3 * kIn); g.translate(-x, -y);
           g.fillStyle = P.ink2; g.font = F(800, G1.lblF); g.textAlign = "center"; g.textBaseline = "alphabetic"; g.fillText(q.lbl, x, yL);
           const lv = clamp(q.lv, q.a === "—" ? 0 : .03, 1) * glide(seg(t, .5 + i * .15, 2.1 + i * .15));
-          if (TRI) triGauge(g, P, x - TRI_D / 2 + TRI_D * .05, y - d / 2, TRI_D, q.k, lv, q.a, q.bv, t, q.u, q.al, q.lv1, q.lf1);
+          if (q.cube) cubeGauge(g, P, x, y, TRI ? TRI_D * .9 : d, lv, q.c);
+          else if (TRI) triGauge(g, P, x - TRI_D / 2 + TRI_D * .05, y - d / 2, TRI_D, q.k, lv, q.a, q.bv, t, q.u, q.al, q.lv1, q.lf1);
           else sphere(g, P, x, y, d, q.k, lv, q.a, q.bv, q.u, t);
           g.restore();
           // 아래 글: 게이지보다 살짝 늦게 통 올라옴

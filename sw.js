@@ -1,10 +1,10 @@
 /* elMotion 서비스 워커: 온라인이면 항상 최신 파일, 신호가 끊기면(엘리베이터 안 등) 저장해 둔 파일로 실행 */
-const CACHE = "elmotion-v87";
+const CACHE = "elmotion-v92";
 const FILES = ["./", "index.html", "app.js", "core.js", "render.js", "sync.js", "manifest.webmanifest",
   "assets/glass.webp", "assets/glass-dark.webp", "assets/fonts/NanumSquareNeo-Variable.woff",
   "assets/ic-measure.png", "assets/ic-records.png", "assets/ic-settings.png",
   "assets/lift-frame.webp", "assets/lift-leafL.webp", "assets/lift-leafR.webp",
-  "assets/app-icon-180.png", "assets/app-icon-192.png", "assets/app-icon-512.png", "assets/app-icon-blank-192.png", "assets/app-icon-blank-512.png", "assets/demo-incline.txt", "assets/glass-tri.webp", "assets/glass-tri-dark.webp", "assets/glass-tri-sil.webp"];
+  "assets/app-icon-180.png", "assets/app-icon-192.png", "assets/app-icon-512.png", "assets/app-icon-blank-192.png", "assets/app-icon-blank-512.png", "assets/demo-incline.txt", "assets/glass-tri.webp", "assets/glass-tri-dark.webp", "assets/glass-tri-sil.webp", "assets/glass-cube.webp", "assets/glass-cube-dark.webp"];
 // 파일 하나가 없어도 설치가 멈추지 않게 하나씩 담는다
 // 새로 받지 못한 파일은 이전 버전 저장소에서 옮겨 담는다 (업데이트 순간 신호가 약해도 유리 이미지 등이 사라지지 않게)
 self.addEventListener("install", e => {

@@ -144,6 +144,24 @@ button:focus-visible, [tabindex]:focus-visible, input:focus-visible { outline: 2
 .tri .tg-top { mix-blend-mode: screen; opacity: .38; }
 :root[data-ui="dark"] .tri .tg-top { opacity: .25; }
 .tri .water { transition: transform .5s cubic-bezier(.3,.7,.3,1); }
+/* 흔들림 큐브 (2026-11-27 사용자 확정): 원형 게이지와 같은 폭, 코랄색 물, 흰 글자 */
+.cube { position: relative; width: var(--d); height: calc(var(--d) * 1.044); flex: none; --wl: #FFB49E; --wm: #FF7E62; --wd: #E0533C; }
+.cube-svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+.cube .cb-d, :root[data-ui="dark"] .cube .cb-l { display: none; }
+:root[data-ui="dark"] .cube .cb-d { display: inline; }
+.cube image { filter: brightness(1.12) saturate(.75); }
+:root[data-ui="dark"] .cube image { filter: brightness(1.35) contrast(1.05); }
+.cube .cb-top { mix-blend-mode: screen; opacity: .4; }
+:root[data-ui="dark"] .cube .cb-top { opacity: .3; }
+.cube .cb-hl { opacity: .95; pointer-events: none; }
+:root[data-ui="dark"] .cube .cb-hl { opacity: .7; }
+.cube .cw-b { opacity: .85; }
+.cube .cw-t { fill: var(--wl); opacity: .6; }
+.cube-txt text { fill: #fff; font-family: inherit; text-anchor: middle; }
+.cube-txt { filter: drop-shadow(0 1px 2px rgba(19, 26, 43, .45)); }
+.cube-txt .cv { font-weight: 800; font-size: 26.4px; letter-spacing: -.5px; font-variant-numeric: tabular-nums; }
+.cube-txt .cl { font-weight: 800; font-size: 13.2px; opacity: .9; }
+.cube-txt .cu { font-size: 12px; font-weight: 700; }
 .tri .w1, .tri .wl { animation: wave 7s linear infinite; }
 .tri.k-acc { --wl: #6E80D4; --wm: #2C46BE; --wd: #17289A; }
 .tri.k-lat { --wl: #BBA3B8; --wm: #94657F; --wd: #8A3A5A; }
@@ -346,8 +364,13 @@ canvas.chart { display: block; width: 100%; height: 150px; touch-action: pan-y; 
 .overall { font-size: 20px; font-weight: 800; letter-spacing: -.4px; line-height: 1.4; margin: 6px 0 18px; text-wrap: balance; background: none; }
 .d-rows { display: flex; flex-direction: column; }
 .d-row { display: grid; grid-template-columns: auto 1fr; gap: 16px; align-items: center; padding: 14px 0; border-top: 1px solid var(--line); }
-.d-row .lbl { font-size: 12.5px; font-weight: 800; color: var(--ink-2); text-align: center; margin-bottom: 4px; }
-.d-row .ev b { display: block; font-size: 17px; font-weight: 800; margin-bottom: 4px; letter-spacing: -.3px; }
+.d-row .lbl { font-size: 25px; letter-spacing: -.02em; font-weight: 800; color: var(--ink-2); text-align: center; margin-bottom: 4px; }
+/* 2026-11-27: 오른쪽 글은 제목이 아니라 게이지 높이의 가운데에 맞춤 (세로 기본 배치만) */
+:root:not(.wide):not(.ui-flip) .d-row > div:first-child { display: contents; }
+:root:not(.wide):not(.ui-flip) .d-row .lbl { grid-column: 1; grid-row: 1; }
+:root:not(.wide):not(.ui-flip) .d-row > div:first-child > div:not(.lbl) { grid-column: 1; grid-row: 2; }
+:root:not(.wide):not(.ui-flip) .d-row .ev { grid-column: 2; grid-row: 2; align-self: center; }
+.d-row .ev b { display: block; white-space: pre-line; font-size: 17px; font-weight: 800; margin-bottom: 4px; letter-spacing: -.3px; }
 .d-row .ev p { margin: 0; font-size: 13px; color: var(--ink-2); line-height: 1.5; }
 .lvn { color: var(--ink); }   /* 성격(가감속 세기 등): 좋고 나쁨이 아니라 색 없이 */
 .d-row .ev .hint { font-size: 11.5px; color: var(--ink-3); margin-top: 4px; }
@@ -650,7 +673,7 @@ body.selecting #recList { padding-bottom: 150px; }
 :root.wide .ai-box p { font-size: 20px; line-height: 30px; }
 :root.wide .d-rows { flex-direction: row; justify-content: space-around; align-items: flex-start; gap: 20px; padding-top: 10px; }
 :root.wide .d-row { flex: 1; grid-template-columns: 1fr; justify-items: center; text-align: center; gap: 12px; border-top: 0; padding: 8px 0; }
-:root.wide .d-row .lbl { font-size: 17px; margin-bottom: 8px; }
+:root.wide .d-row .lbl { font-size: 34px; margin-bottom: 8px; }
 :root.wide .d-row .ev b { font-size: 21px; }
 :root.wide .d-row .ev p { font-size: 14.5px; }
 :root.wide .m6 { grid-template-columns: repeat(9, minmax(0, 1fr)); gap: 10px; }
@@ -722,7 +745,7 @@ body.selecting #recList { padding-bottom: 150px; }
 :root.ui-flip .ai-box p { font-size: 13.5px; line-height: 20px; }
 :root.ui-flip .d-rows { flex-direction: row; justify-content: space-around; align-items: flex-start; gap: 4px; }
 :root.ui-flip .d-row { flex: 1; min-width: 0; grid-template-columns: 1fr; justify-items: center; text-align: center; gap: 6px; border-top: 0; padding: 6px 0; }
-:root.ui-flip .d-row .lbl { font-size: 11.5px; }
+:root.ui-flip .d-row .lbl { font-size: 23px; }   /* 2026-11-27: 게이지 제목 200% */
 :root.ui-flip .d-row .ev b { font-size: 12.5px; }
 :root.ui-flip .d-row .ev p { font-size: 11px; }
 :root.ui-flip .incl-rows .d-row { grid-template-columns: 1fr; }
