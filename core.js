@@ -1392,9 +1392,18 @@
     const txt = r.overall, cut = txt.indexOf(". ");
     r.overall = cut > 0 ? `${txt.slice(0, cut + 1)} 경사 ${I.theta}°로 오르내리는 경사형이에요.${turn} ${txt.slice(cut + 2)}` : `경사 ${I.theta}°로 오르내리는 경사형이에요.${turn} ${txt}`;
     r.fa = { a: accLv(I.accMax)[1], d: accLv(I.decMax)[1] };
+    // 경사형 화면·영상의 간결한 글 (2026-11-27 사용자 확정): 한 문장은 한 줄씩. 가감속은 앞뒤 기준, 흔들림은 '앞뒤로 들썩' 꼴
+    const ADJ = { "아주 강함": "아주 강한", "조금 강함": "조금 강한", "부드러움": "부드러운", "조금 약함": "조금 약한", "느끼기 힘들 만큼 약함": "느끼기 힘든" };
+    const shortVib = t => t.replace(/ · 약 [\d.]+ Hz$/, "").replace(/ 떨려요$/, "").replace(/톡톡 튀어요$/, "톡톡").replace(/튀어요$/, "튐")
+      .replace(/(출렁|일렁|들썩|넘실|울렁|투둑)(여요|거려요|해요)$/, "$1").replace(/(덜컥|조용|잔잔)해요$/, "$1").replace(/툭 쳐요$/, "툭");
+    r.brief = {
+      acc: r.fa.a === r.fa.d ? `${ADJ[r.fa.a]} 가감속.` : `${ADJ[r.fa.a]} 가속, ${ADJ[r.fa.d]} 감속.`,
+      vib: [r.vibF && r.vibF.line, r.vibL && r.vibL.line].filter(Boolean).map(shortVib),
+    };
     // 경사형 속력 등급 (2026-11-26 사용자 확정): 경사 방향 분속 35 m까지 저속, 그 위로 중속
     const along = I.speedAlong != null ? I.speedAlong : m.speedMax / sn, gs = along <= 35 ? "저속" : "중속";
     r.speed = Object.assign({}, r.speed, { s: gs, t: r.speed.t === "정격 속력에 닿기 전에 멈췄어요" ? r.speed.t : `${gs} 승강기예요${m.speedRef ? " (참고값)" : ""}` });
+    r.brief.spd = r.speed.t.replace(/ \(참고값\)$/, "").replace(/예요$/, "");
     if (r.speed.card && r.speed.card !== "정격 속력 미도달") r.speed.card = `${gs} 승강기 · 참고값`;
     return r;
   }

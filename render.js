@@ -365,9 +365,10 @@ const videoMaker = (() => {
       gauges[1].lbl = "흔들림"; gauges[1].lv = Math.max(m.vibL ? m.vibL.p98 : 0, I.vibF.p98) / LEGEND_INC.lat;
       gauges[1].a = I.vibF.n ? I.vibF.p98.toFixed(1) : "—"; gauges[1].bv = m.vibL && m.vibL.n ? m.vibL.p98.toFixed(1) : "—"; gauges[1].lv1 = "앞뒤"; gauges[1].lf1 = "좌우";
       gauges[1].b = [worse.s]; gauges[1].bl = worse.lv; gauges[1].bScale = 1.3;
-      gauges[1].p = [ev.vibF && ev.vibF.line, ev.vibL && ev.vibL.line].filter(Boolean).map(l => l.replace(/ · 약 [\d.]+ Hz$/, "")).join("\n");   // 앞뒤 · 좌우 줄을 나눠서
+      gauges[1].p = ev.brief.vib.join("\n");   // 앞뒤 · 좌우 줄을 나눠서 (간결한 글, 2026-11-27)
       gauges[2].lv = along / LEGEND_INC.spd; gauges[2].a = m.speedMax.toFixed(1); gauges[2].bv = I.speedMax.toFixed(1);
-      gauges[2].al = along.toFixed(1); gauges[2].b = [ev.speed.t.replace(/요$/, "요.")]; gauges[2].bl = -1;
+      gauges[2].al = along.toFixed(1); gauges[2].b = [ev.brief.spd]; gauges[2].bl = -1;
+      gauges[0].b = [ev.brief.acc]; gauges[0].p = "";
     }
     // 게이지: 크기는 예전(400)의 125% → 500, 사이 빈틈은 예전(가운데 간격 W/3 ≈ 774 − 400 = 374)의 1/2 → 187 (2026-11-25 사용자 확정)
     const G1 = { lbl: 76, lblF: 114, drop: 50, b: 64, bLh: 80, p: 44, pLh: 56, d: 500, gap: 500 + (W / 3 - 400) / 2 };
@@ -378,6 +379,15 @@ const videoMaker = (() => {
     // 큰 글은 정해 둔 줄 그대로 (가속 줄·감속 줄), 작은 글만 옆 게이지 글과 겹치지 않을 폭에서 줄바꿈
     g.font = F(400, G1.p); gauges.forEach(q => { q.pl = q.p ? q.p.split("\n").flatMap(l => wrap(g, glue(l), G1.colW - 60)) : []; });
     g.font = F(800, G1.b); gauges.forEach(q => { q.bl2 = q.b.slice(); });
+    if (I) {   // 경사형: 한 문장은 한 줄 — 칸 폭에 안 들어가면 글자를 줄인다 (2026-11-27)
+      const fw = G1.colW - 60;
+      gauges.forEach(q => {
+        g.font = F(800, G1.b * (q.bScale || 1)); const wb = Math.max(...q.bl2.map(l => g.measureText(l).width));
+        if (wb > fw) q.bScale = (q.bScale || 1) * fw / wb;
+        q.pl = q.p ? q.p.split("\n") : []; g.font = F(400, G1.p); const wp = Math.max(0, ...q.pl.map(l => g.measureText(l).width));
+        q.pScale = wp > fw ? fw / wp : 1;
+      });
+    }
     const TRI_D = 520, TRI_EX = TRI ? TRI_D * .95 + 4 + TRI_D * .13 + 20 - G1.d : 0;   // 삼각형: 한 변 520 (예전 400의 1.3배, 2026-11-26), 아래 숫자만큼 글을 내린다
     const colH = q => G1.lbl + G1.sp + G1.d + TRI_EX + 40 + q.bl2.length * G1.bLh * (q.bScale || 1) + (q.pl.length ? 12 + q.pl.length * G1.pLh : 0);
     const G1top = Math.max(40, (H - Math.max(...gauges.map(colH))) / 2);
@@ -463,7 +473,7 @@ const videoMaker = (() => {
           let yy = y + d / 2 + TRI_EX + 40 + G1.b * bs * .82;
           g.font = F(800, G1.b * bs); g.fillStyle = q.bl >= 0 ? (P.dark ? LV.dark : LV.light)[q.bl] : P.ink;
           q.bl2.forEach(l => { g.fillText(l, x, yy); yy += G1.bLh * bs; });
-          g.font = F(400, G1.p); g.fillStyle = P.ink2; yy += 12 - G1.bLh * bs + G1.pLh;
+          g.font = F(400, G1.p * (q.pScale || 1)); g.fillStyle = P.ink2; yy += 12 - G1.bLh * bs + G1.pLh;
           q.pl.forEach(l => { g.fillText(l, x, yy); yy += G1.pLh; });
           g.restore();
         });

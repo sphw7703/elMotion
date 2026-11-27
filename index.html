@@ -173,7 +173,9 @@ button:focus-visible, [tabindex]:focus-visible, input:focus-visible { outline: 2
 .m6 + .incl-sec { margin-top: 18px; }
 .incl-rows .lbl small { margin-left: 3px; font-size: 11px; font-weight: 700; color: var(--ink-3); }
 .incl-rows .g { padding: 6px 30px 30px 46px; }
-.incl-rows .ev p { white-space: pre-line; }
+.incl-rows .d-row { grid-template-columns: auto minmax(0, 1fr); }
+.incl-rows .ev { min-width: 0; }
+.incl-rows .ev p { white-space: pre; }
 .incl-rows #ds-spd { padding-right: 64px; }
 /* 경사 알약: '측정 중' 알약 바로 옆, 같은 디자인 (2026-11-26) */
 #livePill:has(+ .incl-pill:not([hidden])) { margin-right: 0; }

@@ -4,7 +4,7 @@
 /* ───────── 상수 ───────── */
 const FS = Core.FS;
 /* 앱 버전 (2026-11-25 사용자 확정): 0.큰 기능 묶음.고친 횟수 — 웹 앱 확정 때 1.0.0, 안드로이드 앱 때 2.0.0 */
-const APP_VERSION = "0.13.15";
+const APP_VERSION = "0.13.16";
 const LEGEND = { acc: 1.5, lat: 30, latA: 20, spd: 600 };
 const LEGEND_INC = { acc: 1.0, lat: 80, spd: 90 };   // 경사형 게이지 범례 (2026-11-26 사용자 확정): 가감속 1.0 m/s², 흔들림 80 gal, 속력 90 m/min   // 물 높이 범례 (화면에 표시하지 않음). lat: 실시간 p-p, latA: 기록의 |98% 피크|
 const CUT = Math.round(Core.P.CUT_SEC * FS);
@@ -415,6 +415,14 @@ const SERIES_INC = [
 
 /* ───────── 기록 저장소 (IndexedDB) ───────── */
 const cache = new Map();
+/** 경사형: 글 한 문장을 무조건 한 줄로 — 칸에 안 들어가면 글자를 줄인다 */
+function fitLines(root) {
+  root.querySelectorAll(".incl-rows .ev b, .incl-rows .ev p").forEach(el => {
+    el.style.whiteSpace = el.tagName === "P" ? "pre" : "nowrap"; el.style.fontSize = "";
+    const box = el.parentElement, base = parseFloat(getComputedStyle(el).fontSize);
+    let f = base; while (el.scrollWidth > box.clientWidth + 0.5 && f > base * 0.5) { f -= 0.5; el.style.fontSize = f + "px"; }
+  });
+}
 function analysisOf(rec) {
   // 가속도 센서만으로 계산 (출발 직전 영점 + 전체 적분 + 정지 시점 되짚기)
   const k = rec.id + ":" + rec.vert.length + ":" + (rec.segs ? rec.segs.join(".") : "");
@@ -1248,13 +1256,14 @@ const detail = {
     const m = A.m, ev = m.eval, I = m.incl, body = $("#dBody"), sn = Math.sin(I.theta * Math.PI / 180);
     const worse = [ev.vibF, ev.vibL].filter(x => x && x.lv >= 0).sort((a, b) => b.lv - a.lv)[0] || { lv: -1, s: "기록이 없어요." };
     const along = I.speedAlong != null ? I.speedAlong : m.speedMax / sn;
+    const br = ev.brief;
     const rows = [
       { k: "acc", lbl: "가감속도", u: "m/s²", v: Math.max(m.accMax, m.decMax).toFixed(2), f: Math.max(I.accMax, I.decMax).toFixed(2), lv: m.accPeak / sn / LEGEND_INC.acc,
-        b: { lv: "n", t: ev.acc.t }, p: `가속 최대 ${m.accMax.toFixed(2)} · ${I.accMax.toFixed(2)}, 감속 최대 ${m.decMax.toFixed(2)} · ${I.decMax.toFixed(2)} m/s² (수직 · 앞뒤)` },
+        b: { lv: "n", t: br.acc }, p: "" },   // 경사형 UI (2026-11-27 사용자 피드백): 앞뒤 가감속 기준 한 줄, '가속 최대 ~' 줄 뺌
       { k: "lat", lbl: "흔들림", u: "gal", v: I.vibF.n ? I.vibF.p98.toFixed(1) : "—", f: m.vibL && m.vibL.n ? m.vibL.p98.toFixed(1) : "—",
-        lv: Math.max(m.vibL ? m.vibL.p98 : 0, I.vibF.p98) / LEGEND_INC.lat, b: { lv: worse.lv, t: worse.s }, p: [ev.vibF && ev.vibF.line, ev.vibL && ev.vibL.line].filter(Boolean).join("\n") },   // 위아래 줄 · 앞뒤 줄을 나눠서 (2026-11-26)
+        lv: Math.max(m.vibL ? m.vibL.p98 : 0, I.vibF.p98) / LEGEND_INC.lat, b: { lv: worse.lv, t: worse.s }, p: br.vib.join("\n") },   // Hz·'여요' 뺌   // 위아래 줄 · 앞뒤 줄을 나눠서 (2026-11-26)
       { k: "spd", lbl: "속력", u: "m/min", v: m.speedMax.toFixed(1), f: I.speedMax.toFixed(1), lv: along / LEGEND_INC.spd,
-        b: { lv: "n", t: ev.speed.t }, p: I.changes.length ? "경사가 바뀌어 경사 방향 속력은 가장 빠를 때의 값이에요." : "" },
+        b: { lv: "n", t: br.spd }, p: "" },   // '예요 (참고값)'·경사 변화 안내 뺌
     ];
     const size = isWide() ? Math.round(clamp(Math.min(innerHeight * 0.36, innerWidth / 5.6), 140, 250)) : Math.round(clamp(innerWidth * 0.33, 110, 140));
     body.innerHTML = this.inclHead(I) + `<div class="d-rows incl-rows">${rows.map((r, i) => `<div class="d-row fade-in" style="animation-delay:${0.1 + i * 0.1}s">
@@ -1265,6 +1274,7 @@ const detail = {
       g.vals(r.v, r.f, r.k === "spd" ? along.toFixed(1) : null).level(0);
       setTimeout(() => g.level(Math.max(r.lv, r.v === "—" ? 0 : 0.03)), 250 + i * 150);
     });
+    fitLines(body);   // 게이지가 들어간 뒤의 칸 폭 기준으로 한 줄에 맞춤
   },
   simple(A) {
     if (A.m.incl) return this.simpleIncl(A);
